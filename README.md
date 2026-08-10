@@ -32,6 +32,20 @@ model onto a GPU, checks the official dataset SHA256, row count and required
 columns, then runs the repository tests and a Scaf-GRPO integration compile
 check. The JSON report is written to `outputs/preflight_validation.json`.
 
+To automatically run the two first-stage research tests after validation:
+
+```bash
+ENV_NAME=scaf-grpo LIMIT=8 DEVICE=cuda:0 \
+  bash scripts/run_two_idea_probes.sh
+```
+
+The first probe measures the capability-dependent scaffold frontier and
+compiles a curriculum manifest. The second compares no help, random one-bit
+feedback, self-asked binary verification, and minimal knowledge/planning/
+solution assistance. The MetaAsk oracle is the same base model conditioned on
+the reference solution, so this is explicitly a mechanism test rather than a
+final learned ASK policy result.
+
 This creates `data/DeepScaleR/Qwen2.5-Math-1.5B.parquet` (12,880 problems).
 The 126 MB parquet is intentionally not duplicated in GitHub. To fetch the
 whole official data repository instead, run:
