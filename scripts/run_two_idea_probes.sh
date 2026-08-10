@@ -15,11 +15,17 @@ RUN_ROOT="${RUN_ROOT:-$PROJECT_ROOT/outputs/two_idea_probe}"
 MIN_FREE_GPU_MB="${MIN_FREE_GPU_MB:-10000}"
 GPU_POLL_SECONDS="${GPU_POLL_SECONDS:-30}"
 
-python_cmd=(conda run --no-capture-output -n "$ENV_NAME" python)
+if [[ -n "${PYTHON_BIN:-}" ]]; then
+  python_cmd=("$PYTHON_BIN")
+else
+  python_cmd=(conda run --no-capture-output -n "$ENV_NAME" python)
+fi
 
-ENV_NAME="$ENV_NAME" MODEL_PATH="$MODEL_PATH" DATA_FILE="$DATA_FILE" \
-  SCAF_REPO="${SCAF_REPO:-$ROOT/Scaf-GRPO}" \
-  bash "$PROJECT_ROOT/scripts/wait_and_validate_downloads.sh"
+if [[ "${SKIP_PREFLIGHT:-0}" != "1" ]]; then
+  ENV_NAME="$ENV_NAME" MODEL_PATH="$MODEL_PATH" DATA_FILE="$DATA_FILE" \
+    SCAF_REPO="${SCAF_REPO:-$ROOT/Scaf-GRPO}" \
+    bash "$PROJECT_ROOT/scripts/wait_and_validate_downloads.sh"
+fi
 
 gpu_index="${DEVICE#cuda:}"
 if [[ "$DEVICE" == cuda:* ]] && command -v nvidia-smi >/dev/null 2>&1; then
@@ -71,7 +77,8 @@ echo "[3/3] Running MetaAsk minimal-information mechanism probe..."
   --limit "$LIMIT" \
   --samples-per-variant "$METAASK_SAMPLES" \
   --max-new-tokens "$MAX_NEW_TOKENS" \
-  --batch-size 4
+  --batch-size 4 \
+  --stop-after-boxed
 
 echo "Both first-stage probes finished."
 echo "Capability summary: $RUN_ROOT/capability_frontier/summary.json"

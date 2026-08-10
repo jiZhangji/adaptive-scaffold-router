@@ -118,8 +118,16 @@ class LocalGenerator:
         ).to(args.device)
         self.model.eval()
 
-    def generate(self, prompts: list[str], max_new_tokens: int, seed: int) -> list[dict[str, Any]]:
+    def generate(
+        self,
+        prompts: list[str],
+        max_new_tokens: int,
+        seed: int,
+        stop_after_boxed: bool = False,
+    ) -> list[dict[str, Any]]:
         torch = self.torch
+        from transformers import StoppingCriteria, StoppingCriteriaList
+
         outputs: list[dict[str, Any]] = []
         for start in range(0, len(prompts), self.args.batch_size):
             batch_prompts = prompts[start : start + self.args.batch_size]
@@ -142,6 +150,22 @@ class LocalGenerator:
             }
             if self.args.temperature > 0:
                 kwargs.update(temperature=self.args.temperature, top_p=self.args.top_p)
+            if stop_after_boxed:
+                tokenizer = self.tokenizer
+
+                class BoxedAnswerStoppingCriteria(StoppingCriteria):
+                    def __call__(self, input_ids, scores, **kwargs):
+                        del scores, kwargs
+                        finished = []
+                        for sequence in input_ids:
+                            generated = sequence[prompt_length:]
+                            text = tokenizer.decode(generated, skip_special_tokens=True)
+                            finished.append(has_complete_boxed_answer(text))
+                        return torch.tensor(finished, device=input_ids.device, dtype=torch.bool)
+
+                kwargs["stopping_criteria"] = StoppingCriteriaList(
+                    [BoxedAnswerStoppingCriteria()]
+                )
             begun = time.perf_counter()
             with torch.inference_mode():
                 sequences = self.model.generate(**inputs, **kwargs)
@@ -202,7 +226,12 @@ def run(args: argparse.Namespace) -> None:
 
     def solve_variant(variant: str, users: list[str], external_tokens: list[int] | None = None) -> None:
         prompts = [chat_prompt(tokenizer, SYSTEM_PROMPT, user) for user in users]
-        generated = generator.generate(prompts, args.max_new_tokens, args.seed + len(records) + 10)
+        generated = generator.generate(
+            prompts,
+            args.max_new_tokens,
+            args.seed + len(records) + 10,
+            stop_after_boxed=args.stop_after_boxed,
+        )
         for index, (job, result) in enumerate(zip(jobs, generated)):
             info_tokens = external_tokens[index] if external_tokens else 0
             records.append(
@@ -324,6 +353,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-source-accuracy", type=float, default=0.0)
     parser.add_argument("--trust-remote-code", action="store_true")
+    parser.add_argument("--stop-after-boxed", action="store_true")
     return parser.parse_args()
 
 
