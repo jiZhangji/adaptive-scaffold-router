@@ -12,12 +12,30 @@ CAPABILITY_SAMPLES="${CAPABILITY_SAMPLES:-2}"
 METAASK_SAMPLES="${METAASK_SAMPLES:-1}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-768}"
 RUN_ROOT="${RUN_ROOT:-$PROJECT_ROOT/outputs/two_idea_probe}"
+MIN_FREE_GPU_MB="${MIN_FREE_GPU_MB:-10000}"
+GPU_POLL_SECONDS="${GPU_POLL_SECONDS:-30}"
 
 python_cmd=(conda run --no-capture-output -n "$ENV_NAME" python)
 
 ENV_NAME="$ENV_NAME" MODEL_PATH="$MODEL_PATH" DATA_FILE="$DATA_FILE" \
   SCAF_REPO="${SCAF_REPO:-$ROOT/Scaf-GRPO}" \
   bash "$PROJECT_ROOT/scripts/wait_and_validate_downloads.sh"
+
+gpu_index="${DEVICE#cuda:}"
+if [[ "$DEVICE" == cuda:* ]] && command -v nvidia-smi >/dev/null 2>&1; then
+  while true; do
+    gpu_status="$(nvidia-smi --query-gpu=memory.free,utilization.gpu \
+      --format=csv,noheader,nounits -i "$gpu_index" | head -n 1)"
+    free_mb="$(echo "$gpu_status" | cut -d, -f1 | tr -d ' ')"
+    utilization="$(echo "$gpu_status" | cut -d, -f2 | tr -d ' ')"
+    if [[ "$free_mb" =~ ^[0-9]+$ && "$free_mb" -ge "$MIN_FREE_GPU_MB" ]]; then
+      echo "GPU $gpu_index is ready: free=${free_mb}MB, utilization=${utilization}%"
+      break
+    fi
+    echo "GPU $gpu_index is busy: free=${free_mb:-unknown}MB, utilization=${utilization:-unknown}%; waiting..."
+    sleep "$GPU_POLL_SECONDS"
+  done
+fi
 
 mkdir -p "$RUN_ROOT"
 

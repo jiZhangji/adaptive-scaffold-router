@@ -39,6 +39,9 @@ ENV_NAME=scaf-grpo LIMIT=8 DEVICE=cuda:0 \
   bash scripts/run_two_idea_probes.sh
 ```
 
+The launcher also waits until the selected GPU has at least 10 GB free. Override
+this guard with `MIN_FREE_GPU_MB` when necessary.
+
 The first probe measures the capability-dependent scaffold frontier and
 compiles a curriculum manifest. The second compares no help, random one-bit
 feedback, self-asked binary verification, and minimal knowledge/planning/
