@@ -1,5 +1,7 @@
 # Adaptive Scaffold Experiment
 
+中文研究方案见 [`ideas/README.md`](ideas/README.md)：其中分别记录了图片中的能力匹配子问题—脚手架课程方案，以及独立的 MetaAsk-GRPO 主动求助方案。
+
 ## Quick server setup
 
 Clone this public repository over HTTPS; no GitHub SSH key is required:
