@@ -19,6 +19,19 @@ checks its published SHA256 digest:
 bash scripts/download_scaf_data.sh
 ```
 
+While the model is downloading in another shell, the following command can
+wait for both assets and automatically validate them using the named Conda
+environment `scaf-grpo`:
+
+```bash
+ENV_NAME=scaf-grpo bash scripts/wait_and_validate_downloads.sh
+```
+
+It verifies the model shards and safetensors headers without loading the full
+model onto a GPU, checks the official dataset SHA256, row count and required
+columns, then runs the repository tests and a Scaf-GRPO integration compile
+check. The JSON report is written to `outputs/preflight_validation.json`.
+
 This creates `data/DeepScaleR/Qwen2.5-Math-1.5B.parquet` (12,880 problems).
 The 126 MB parquet is intentionally not duplicated in GitHub. To fetch the
 whole official data repository instead, run:
