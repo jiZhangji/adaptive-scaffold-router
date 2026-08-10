@@ -1,0 +1,92 @@
+--- a/hint_mix_grpo/trainer/ray_trainer.py
++++ b/hint_mix_grpo/trainer/ray_trainer.py
+@@ -50,4 +50,6 @@ from hint_mix_grpo.curriculum_runtime import (
++    apply_sequence_weights,
+     build_curriculum_new_message,
+     load_optional_manifest,
++    sequence_importance_weights,
+ )
+ 
+@@ -342,6 +344,20 @@ class RayPPOTrainer:
+         self.curriculum_fade_end = int(config.trainer.get("curriculum_fade_end", 1000000000))
+         self.curriculum_rollouts = int(config.trainer.get("curriculum_rollouts", 4))
+         self.curriculum_enabled = self.curriculum_manifest is not None
+         self.replace_num = config.trainer.get("replace_num", 1)
++        self.curriculum_off_context = bool(
++            config.trainer.get("curriculum_off_context", False)
++        )
++        self.curriculum_is_clip_low = float(
++            config.trainer.get("curriculum_is_clip_low", 0.2)
++        )
++        self.curriculum_is_clip_high = float(
++            config.trainer.get("curriculum_is_clip_high", 5.0)
++        )
++        self.curriculum_is_length_normalize = bool(
++            config.trainer.get("curriculum_is_length_normalize", True)
++        )
++        if self.curriculum_off_context and not self.replace_hint_prompt:
++            raise ValueError("curriculum_off_context requires trainer.replace_hint_prompt=true")
+ 
+         # if ref_in_actor is True, the reference policy will be actor without lora applied
+@@ -1596,6 +1609,11 @@ class RayPPOTrainer:
+                         reward_tensor_debug, reward_extra_infos_dict_debug = compute_reward(batch, self.reward_fn)
+                         assert reward_tensor_debug.shape == reward_tensor_first.shape, "Reward tensor shape mismatch after debug"
+                         assert reward_extra_infos_dict_debug == reward_extra_infos_dict_first, "Reward extra infos mismatch"
+                         assert torch.equal(reward_tensor_first, reward_tensor_debug), "Reward tensors do not match after debug"
++                        if self.curriculum_off_context:
++                            batch.batch["curriculum_off_context_mask"] = torch.zeros(
++                                batch.batch["responses"].shape[0], dtype=torch.bool,
++                                device=batch.batch["responses"].device,
++                            )
+ 
+                         if new_data_map:
+@@ -1629,5 +1647,14 @@ class RayPPOTrainer:
+                                             batch.batch["input_ids"][orig_idx] = torch.cat ([batch.batch["prompts"][orig_idx],batch.batch["responses"][orig_idx]],dim=0)
+                                             batch.batch["attention_mask"][orig_idx] = (batch.batch["input_ids"][orig_idx] != self.tokenizer.pad_token_id).long()
+                                             batch.batch["position_ids"][orig_idx] = compute_position_id_with_mask(batch.batch["attention_mask"][orig_idx])
++                                            if self.curriculum_off_context:
++                                                if "rollout_log_probs" not in new_gen_batch_output.batch:
++                                                    raise ValueError(
++                                                        "Off-context correction requires rollout_log_probs from hinted generation"
++                                                    )
++                                                batch.batch["rollout_log_probs"][orig_idx] = (
++                                                    new_gen_batch_output.batch["rollout_log_probs"][new_idx]
++                                                )
++                                                batch.batch["curriculum_off_context_mask"][orig_idx] = True
+                                         else:
+                                             for tensor_key in batch.batch.keys():
+@@ -1850,5 +1876,34 @@ class RayPPOTrainer:
+                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
+                             config=self.config.algorithm,
+                         )
++                        if (
++                            self.curriculum_off_context
++                            and "curriculum_off_context_mask" in batch.batch
++                            and batch.batch["curriculum_off_context_mask"].any()
++                        ):
++                            active = batch.batch["curriculum_off_context_mask"].bool()
++                            is_weights = sequence_importance_weights(
++                                target_log_probs=batch.batch["old_log_probs"],
++                                behavior_log_probs=batch.batch["rollout_log_probs"],
++                                response_mask=batch.batch["response_mask"],
++                                clip_low=self.curriculum_is_clip_low,
++                                clip_high=self.curriculum_is_clip_high,
++                                length_normalize=self.curriculum_is_length_normalize,
++                            )
++                            is_weights = torch.where(active, is_weights, torch.ones_like(is_weights))
++                            batch.batch["advantages"] = apply_sequence_weights(
++                                batch.batch["advantages"],
++                                is_weights,
++                                batch.batch["response_mask"],
++                            )
++                            active_weights = is_weights[active]
++                            metrics.update(
++                                {
++                                    "curriculum/is_weight_mean": active_weights.mean().detach().item(),
++                                    "curriculum/is_weight_min": active_weights.min().detach().item(),
++                                    "curriculum/is_weight_max": active_weights.max().detach().item(),
++                                    "curriculum/off_context_count": int(active.sum().detach().item()),
++                                }
++                            )
+ 
+                     # update critic

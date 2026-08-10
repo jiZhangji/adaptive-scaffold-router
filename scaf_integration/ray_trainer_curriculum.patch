@@ -1,0 +1,56 @@
+--- a/hint_mix_grpo/trainer/ray_trainer.py
++++ b/hint_mix_grpo/trainer/ray_trainer.py
+@@ -45,4 +45,8 @@ from verl.utils.torch_functional import masked_mean
+ from verl.utils.tracking import ValidationGenerationsLogger
+ 
++from hint_mix_grpo.curriculum_runtime import (
++    build_curriculum_new_message,
++    load_optional_manifest,
++)
+ 
+ WorkerType = Type[Worker]
+@@ -331,5 +335,12 @@ class RayPPOTrainer:
+         self.replace_hint_prompt = config.trainer.get("replace_hint_prompt", False)
+         self.validation_generations_logger = ValidationGenerationsLogger()
+         self.warmup_steps = config.trainer.get("warmup_steps", 0)
++        self.curriculum_manifest = load_optional_manifest(
++            config.trainer.get("curriculum_manifest", None)
++        )
++        self.curriculum_fade_start = int(config.trainer.get("curriculum_fade_start", 0))
++        self.curriculum_fade_end = int(config.trainer.get("curriculum_fade_end", 1000000000))
++        self.curriculum_rollouts = int(config.trainer.get("curriculum_rollouts", 4))
++        self.curriculum_enabled = self.curriculum_manifest is not None
+         self.replace_num = config.trainer.get("replace_num", 1)
+ 
+@@ -1509,12 +1520,25 @@ class RayPPOTrainer:
+                                     print(f"ERROR: Question {uid} in new_gen_batch but rewards are not all 0: {uid_rewards}")
+                         
+                         assert len(new_gen_batch.non_tensor_batch['uid']) == solve_none_first
+-                        new_gen_batch = build_new_message(
+-                            new_gen_batch,
+-                            self.tokenizer,
+-                            max_length=self.config.data.max_prompt_length,
+-                            truncation=self.config.data.truncation,
+-                        )
++                        if self.curriculum_enabled:
++                            new_gen_batch = build_curriculum_new_message(
++                                new_gen_batch,
++                                self.tokenizer,
++                                manifest=self.curriculum_manifest,
++                                step=self.global_steps,
++                                fade_start=self.curriculum_fade_start,
++                                fade_end=self.curriculum_fade_end,
++                                rollouts=self.curriculum_rollouts,
++                                max_length=self.config.data.max_prompt_length,
++                                truncation=self.config.data.truncation,
++                            )
++                        else:
++                            new_gen_batch = build_new_message(
++                                new_gen_batch,
++                                self.tokenizer,
++                                max_length=self.config.data.max_prompt_length,
++                                truncation=self.config.data.truncation,
++                            )
+                         size_divisor = (
+                             self.actor_rollout_wg.world_size
+                             if not self.async_rollout_mode

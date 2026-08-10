@@ -1,0 +1,6 @@
+transformers==4.51.3
+accelerate
+pandas
+pyarrow
+scikit-learn
+math-verify

@@ -1,0 +1,7 @@
+--- a/hint_mix_grpo/trainer/ray_trainer.py
++++ b/hint_mix_grpo/trainer/ray_trainer.py
+@@ -1640,3 +1640,3 @@ class RayPPOTrainer:
+                             batch.batch["curriculum_off_context_mask"] = torch.zeros(
+-                                len(batch.batch), dtype=torch.bool,
++                                batch.batch["responses"].shape[0], dtype=torch.bool,
+                                 device=batch.batch["responses"].device,

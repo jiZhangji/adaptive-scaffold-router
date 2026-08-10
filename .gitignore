@@ -6,9 +6,9 @@ venv/
 outputs/
 checkpoints/
 models/
+data/DeepScaleR/
 *.safetensors
 *.bin
 *.pt
 *.pth
 .env
-
