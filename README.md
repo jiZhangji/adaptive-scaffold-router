@@ -2,6 +2,8 @@
 
 中文研究方案见 [`ideas/README.md`](ideas/README.md)：其中分别记录了图片中的能力匹配子问题—脚手架课程方案，以及独立的 MetaAsk-GRPO 主动求助方案。
 
+两个方向的首轮远端机制实验见 [`results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md`](results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md)。
+
 ## Quick server setup
 
 Clone this public repository over HTTPS; no GitHub SSH key is required:

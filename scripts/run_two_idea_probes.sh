@@ -80,8 +80,24 @@ echo "[3/3] Running MetaAsk minimal-information mechanism probe..."
   --batch-size 4 \
   --stop-after-boxed
 
+"${python_cmd[@]}" "$PROJECT_ROOT/analyze_metaask_results.py" \
+  --input "$RUN_ROOT/metaask/raw_results.jsonl" \
+  --output "$RUN_ROOT/metaask/diagnostics.json"
+
+echo "Running controlled one-bit answer-verification retry..."
+"${python_cmd[@]}" "$PROJECT_ROOT/metaask_answer_retry.py" \
+  --input "$RUN_ROOT/metaask/raw_results.jsonl" \
+  --model "$MODEL_PATH" \
+  --output-dir "$RUN_ROOT/metaask_controlled" \
+  --device "$DEVICE" \
+  --batch-size 4 \
+  --max-new-tokens "$MAX_NEW_TOKENS" \
+  --stop-after-boxed
+
 echo "Both first-stage probes finished."
 echo "Capability summary: $RUN_ROOT/capability_frontier/summary.json"
 echo "Curriculum manifest: $RUN_ROOT/capability_curriculum/curriculum.jsonl"
 echo "MetaAsk summary:     $RUN_ROOT/metaask/summary.json"
+echo "MetaAsk diagnostics: $RUN_ROOT/metaask/diagnostics.json"
+echo "Controlled 1-bit:    $RUN_ROOT/metaask_controlled/summary.json"
 echo "These are mechanism probes, not final RL training results."
