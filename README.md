@@ -13,6 +13,53 @@ git clone https://github.com/jiZhangji/adaptive-scaffold-router.git
 cd adaptive-scaffold-router
 ```
 
+## Two-GPU feasibility screen
+
+The recommended first decision experiment is a mechanism screen rather than a
+full RL run. It tests both ideas in parallel on two GPUs:
+
+- GPU 0: scaffold frontier plus a causal subproblem-relevance control. A root
+  receives either its own verified prerequisite or an equally formatted
+  prerequisite from another root.
+- GPU 1: MetaAsk, random-bit, minimal-assistance, and controlled answer-
+  verification comparisons.
+
+Download the exact Qwen2.5-Math-1.5B model and the official model-specific
+Scaf-GRPO parquet split into repository-relative directories, then validate
+both assets:
+
+```bash
+ENV_NAME=scaf-grpo MAX_WORKERS=8 \
+  bash scripts/download_probe_assets.sh
+```
+
+The resolved locations are always printed. By default they are:
+
+```text
+models/Qwen2.5-Math-1.5B
+data/DeepScaleR/Qwen2.5-Math-1.5B.parquet
+```
+
+Run a 32-question preliminary screen on two visible H200 GPUs:
+
+```bash
+ENV_NAME=scaf-grpo GPU0=0 GPU1=1 LIMIT=32 \
+  bash scripts/run_feasibility_screen_2gpu.sh
+```
+
+The two independent branches run concurrently, one heavy model process per
+GPU. The launcher writes separate logs and then produces:
+
+```text
+outputs/feasibility_screen_n32/feasibility_report.md
+outputs/feasibility_screen_n32/feasibility_report.json
+```
+
+The report labels each idea as `promising`, `mixed_evidence`, or
+`not_supported_yet`. These labels use explicit rescue, cost, causal relevance,
+active-query, and control thresholds. They are a go/no-go screen for a later
+RL smoke test, not a final training result.
+
 Download the exact Scaf-GRPO training split used by the current Qwen2.5-Math-
 1.5B experiments. The script downloads the official Hugging Face artifact and
 checks its published SHA256 digest:
