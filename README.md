@@ -1,8 +1,69 @@
 # Adaptive Scaffold Experiment
 
-中文研究方案见 [`ideas/README.md`](ideas/README.md)：其中分别记录了图片中的能力匹配子问题—脚手架课程方案，以及独立的 MetaAsk-GRPO 主动求助方案。
+## Qwen2.5-Math-1.5B paper reproduction
 
-两个方向的首轮远端机制实验见 [`results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md`](results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md)。
+The paper-facing sequence is Base, Vanilla GRPO, Scaf-GRPO, and then the new
+method, all evaluated on the same seven benchmarks. Start with the 1.5B model;
+its Table 1 macro averages are 18.7%, 37.6%, and 41.5%, respectively. Prepare
+the model and matching model-specific training parquet on the networked machine:
+
+```bash
+SCAF_REPO=/absolute/path/to/Scaf-GRPO ENV_NAME=scaf-grpo \
+  STAGE=prepare bash scripts/run_qwen_math_1_5b_reproduction.sh
+```
+
+The preparation step resumes interrupted downloads, validates all model
+shards and official datasets, and applies the context configuration documented
+by Scaf-GRPO (`sliding_window=null`, `rope_theta=15000`, and
+`max_position_embeddings=6144`). The original Hugging Face config is retained
+as `config.huggingface-original.json`.
+
+If download and evaluation happen on the same two-GPU machine, use
+`STAGE=prepare-base` to perform both steps automatically. With separate
+networked and offline instances, use `STAGE=prepare` on the networked instance
+and `STAGE=base` on the H100 instance after the shared files are visible.
+
+On the offline two-H100 machine, first reproduce the Base greedy pass@1 row:
+
+```bash
+conda activate scaf-grpo
+SCAF_REPO=/absolute/path/to/Scaf-GRPO \
+  STAGE=base bash scripts/run_qwen_math_1_5b_reproduction.sh
+```
+
+This uses one Ray job at a time and both GPUs, avoiding interference between
+independent Ray clusters. It writes `paper_comparison.md` against the
+Qwen2.5-Math-1.5B Base row in Table 1. Do not start expensive RL runs until
+this row is reasonably close to the paper's 18.7% macro average.
+
+The official Vanilla GRPO and Scaf-GRPO configurations can then be reproduced
+sequentially. The full mode preserves the paper's 10 epochs, global batch 256,
+eight rollouts, PPO mini-batch 64, learning rate 1e-6, and 2048 response tokens.
+Micro-batching is reduced for two H100 GPUs and FlashAttention-dependent
+optimizations are disabled; these change throughput, not the learning target.
+The public training launcher differs from the paper in some defaults (notably
+100 versus 10 epochs), so this reproduction follows the paper text and reports
+the difference explicitly.
+
+```bash
+CONFIRM_FULL_REPRO=YES METHOD=vanilla MODE=paper \
+  SCAF_REPO=/absolute/path/to/Scaf-GRPO \
+  STAGE=vanilla-paper bash scripts/run_qwen_math_1_5b_reproduction.sh
+
+CONFIRM_FULL_REPRO=YES METHOD=scaf MODE=paper \
+  SCAF_REPO=/absolute/path/to/Scaf-GRPO \
+  STAGE=scaf-paper bash scripts/run_qwen_math_1_5b_reproduction.sh
+```
+
+Use `MODE=smoke` without the confirmation flag for a one-step pipeline check.
+`STAGE=baseline-smokes` runs both one-step checks sequentially.
+The paper selects the best validation checkpoint, so checkpoint merging and
+the final seven-benchmark evaluation must use that checkpoint rather than
+silently assuming the final checkpoint is best.
+
+??????? [`ideas/README.md`](ideas/README.md)????????????????????????????????? MetaAsk-GRPO ???????
+
+?????????????? [`results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md`](results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md)?
 
 ## Quick server setup
 
