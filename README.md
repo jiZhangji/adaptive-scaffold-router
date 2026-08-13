@@ -35,6 +35,16 @@ seen in the earlier baseline logs.  It is a mechanism check, not a final paper
 result.  Scale both arms to identical steps/tokens only after the feasibility
 gate passes.
 
+On a network-isolated two-H100/H200 instance that shares storage with the
+download instance, the following command waits for both 1.5B policy and teacher
+weights, performs an offline safetensors/tokenizer check, and starts training
+automatically:
+
+```bash
+ENV_NAME=scaf-grpo LIMIT=64 SAMPLES=4 TRAIN_STEPS=10 \
+  bash scripts/wait_for_1_5b_and_train_2gpu.sh
+```
+
 ## Qwen2.5-Math-1.5B paper reproduction
 
 The paper-facing sequence is Base, Vanilla GRPO, Scaf-GRPO, and then the new
