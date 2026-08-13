@@ -5,6 +5,8 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCAF_REPO="${SCAF_REPO:-$(dirname "$PROJECT_ROOT")/Scaf-GRPO}"
 MODEL_PATH="${MODEL_PATH:-$PROJECT_ROOT/models/Qwen2.5-Math-1.5B}"
 PAPER_REFERENCE="${PAPER_REFERENCE:-base}"
+METHOD_LABEL="${METHOD_LABEL:-$PAPER_REFERENCE}"
+PROTOCOL_ID="scaf-grpo-greedy-pass1-v1"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 N_GPUS="${N_GPUS:-2}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
@@ -20,6 +22,43 @@ export HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false WANDB_MODE=disabled
 mkdir -p "$OUT/logs"
 printf '%s\n' "$OUT" > "$PROJECT_ROOT/outputs/latest_qwen_math_1_5b_eval.txt"
 printf '%s\n' "$$" > "$OUT/pid.txt"
+
+# Persist the exact evaluation contract next to every result.  A score without
+# this file must not be mixed into the unified Base/Vanilla/Scaf/Subproblem
+# comparison table.
+"$PYTHON_BIN" - "$OUT/evaluation_protocol.json" "$MODEL_PATH" \
+  "$METHOD_LABEL" "$PAPER_REFERENCE" "$PROTOCOL_ID" <<'PY'
+import json, os, sys
+from pathlib import Path
+
+output, model, method, reference, protocol_id = sys.argv[1:]
+payload = {
+    "protocol_id": protocol_id,
+    "method": method,
+    "paper_reference": reference,
+    "model_path": str(Path(model).resolve()),
+    "decoding": {
+        "metric": "pass@1",
+        "n_samples": 1,
+        "do_sample": False,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": -1,
+        "prompt_length": 2048,
+        "response_length": 2048,
+    },
+    "verification": "Scaf-GRPO verl.trainer.main_eval math-verify/symeval pipeline",
+    "checkpoint_rule": (
+        "base pretrained weights" if method == "base"
+        else "best validation checkpoint, merged to Hugging Face format"
+    ),
+    "benchmarks": [
+        "AIME24", "AIME25", "AMC23", "MinervaMath", "MATH-500",
+        "OlympiadBench", "GaoKao2023en",
+    ],
+}
+Path(output).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+PY
 
 declare -A DATASETS=(
   [AIME24]="data/AIME24/math-verify/system-p1/test.parquet"
@@ -43,13 +82,13 @@ for dataset in "${ORDER[@]}"; do
     continue
   fi
 
-  echo "[$dataset] generating greedy pass@1 on $N_GPUS GPUs"
+  echo "[$dataset] generating unified greedy pass@1 on $N_GPUS GPUs"
   "$PYTHON_BIN" -m verl.trainer.main_generation \
     trainer.nnodes=1 trainer.n_gpus_per_node="$N_GPUS" \
     data.path="$data_path" data.batch_size=1024 data.prompt_key=prompt \
     data.n_samples=1 data.output_path="$save_path" \
     model.path="$MODEL_PATH" +model.trust_remote_code=True \
-    rollout.do_sample=False rollout.temperature=1.0 rollout.top_p=1.0 rollout.top_k=-1 \
+    rollout.do_sample=False rollout.temperature=0.0 rollout.top_p=1.0 rollout.top_k=-1 \
     rollout.prompt_length=2048 rollout.response_length=2048 \
     rollout.tensor_model_parallel_size=1 rollout.gpu_memory_utilization=0.72 \
     rollout.max_num_batched_tokens=32768 rollout.log_prob_micro_batch_size_per_gpu=1 \
@@ -63,6 +102,6 @@ done
 
 cd "$PROJECT_ROOT"
 "$PYTHON_BIN" scripts/summarize_paper_eval.py --run-root "$OUT" \
-  --model-size 1.5b --paper-reference "$PAPER_REFERENCE" \
+  --model-size 1.5b --paper-reference "$PAPER_REFERENCE" --method-label "$METHOD_LABEL" \
   | tee "$OUT/logs/summary.log"
 echo "Evaluation complete: $OUT/paper_comparison.md"

@@ -106,6 +106,16 @@ The paper selects the best validation checkpoint, so checkpoint merging and
 the final seven-benchmark evaluation must use that checkpoint rather than
 silently assuming the final checkpoint is best.
 
+### Unified four-arm evaluation
+
+Base, Vanilla GRPO, Scaf-GRPO, and the verifiable-subproblem method must all be
+evaluated with `scripts/run_unified_paper_eval_2h100.sh`.  The launcher fixes
+one greedy generation per problem, a 2048-token response budget, the same seven
+test files, and the official math verifier.  It also writes
+`evaluation_protocol.json`; do not combine a run lacking the same protocol ID
+with the four-arm comparison.  Trained checkpoints must first be selected by
+validation performance and merged into Hugging Face format.
+
 ??????? [`ideas/README.md`](ideas/README.md)????????????????????????????????? MetaAsk-GRPO ???????
 
 ?????????????? [`results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md`](results/TWO_IDEA_PRELIMINARY_RESULTS_zh.md)?

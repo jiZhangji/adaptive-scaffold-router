@@ -25,6 +25,11 @@ class PaperEvalSummaryTest(unittest.TestCase):
         self.assertAlmostEqual(sum(PAPER["1.5b"]["vanilla"]) / 7, 37.6, places=1)
         self.assertAlmostEqual(sum(PAPER["1.5b"]["scaf"]) / 7, 41.5, places=1)
 
+    def test_paper_rows_share_the_unified_dataset_order(self):
+        for model_rows in PAPER.values():
+            for row in model_rows.values():
+                self.assertEqual(len(row), len(DATASETS))
+
 
 if __name__ == "__main__":
     unittest.main()

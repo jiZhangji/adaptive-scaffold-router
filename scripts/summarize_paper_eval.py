@@ -47,6 +47,7 @@ def main() -> None:
     parser.add_argument(
         "--paper-reference", choices=["base", "vanilla", "scaf"], default="base"
     )
+    parser.add_argument("--method-label", default=None)
     args = parser.parse_args()
 
     scores = {
@@ -59,6 +60,7 @@ def main() -> None:
 
     report = {
         "model_size": args.model_size,
+        "method": args.method_label or args.paper_reference,
         "paper_reference": args.paper_reference,
         "scores_percent": scores,
         "macro_average_percent": macro,
@@ -73,6 +75,7 @@ def main() -> None:
     lines = [
         f"# Qwen2.5-Math-{args.model_size.upper()} paper comparison",
         "",
+        f"Method: **{args.method_label or args.paper_reference}**",
         f"Paper reference: **{args.paper_reference}**",
         "",
         "| Dataset | Reproduced | Paper | Gap |",
@@ -88,7 +91,8 @@ def main() -> None:
             f"| **Macro average** | **{macro:.1f}%** | **{paper_macro:.1f}%** | "
             f"**{macro - paper_macro:+.1f} pp** |",
             "",
-            "The paper reports greedy pass@1 and selects the best training checkpoint.",
+            "Unified protocol: one greedy solution per problem, 2048 response tokens, "
+            "the official math verifier, and the best validation checkpoint for trained methods.",
         ]
     )
     markdown = "\n".join(lines) + "\n"
