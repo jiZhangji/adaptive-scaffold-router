@@ -10,14 +10,17 @@ PROTOCOL_ID="scaf-grpo-greedy-pass1-v1"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 N_GPUS="${N_GPUS:-2}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+SKIP_PREPARE="${SKIP_PREPARE:-0}"
 RUN_NAME="${RUN_NAME:-qwen_math_1_5b_${PAPER_REFERENCE}_$(date +%Y%m%d_%H%M%S)}"
 OUT="${OUT:-$PROJECT_ROOT/outputs/$RUN_NAME}"
 
 export CUDA_VISIBLE_DEVICES HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 export HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false WANDB_MODE=disabled
 
-"$PYTHON_BIN" "$PROJECT_ROOT/scripts/prepare_qwen_math_1_5b_repro.py" \
-  --project-root "$PROJECT_ROOT" --scaf-repo "$SCAF_REPO" --validate-only >/dev/null
+if [[ "$SKIP_PREPARE" != "1" ]]; then
+  "$PYTHON_BIN" "$PROJECT_ROOT/scripts/prepare_qwen_math_1_5b_repro.py" \
+    --project-root "$PROJECT_ROOT" --scaf-repo "$SCAF_REPO" --validate-only >/dev/null
+fi
 
 mkdir -p "$OUT/logs"
 printf '%s\n' "$OUT" > "$PROJECT_ROOT/outputs/latest_qwen_math_1_5b_eval.txt"
