@@ -239,6 +239,21 @@ not yet training examples: they must still pass answer verification, leakage
 checks, student success-probability calibration and the matched random-
 subproblem relevance control.
 
+After the 64-root screen passes, generate three candidates for every zero-
+reward root (`accuracy == 0`): knowledge application, planning target, and
+intermediate calculation. The confirmation guard first prints the exact number
+of paid API calls and requested candidates.
+
+```bash
+bash scripts/generate_all_zero_reward_subproblems_deepseek.sh
+CONFIRM_FULL_GENERATION=YES \
+  bash scripts/generate_all_zero_reward_subproblems_deepseek.sh
+```
+
+The full run uses one API request per root to obtain all three dimensions and
+resumes in the fixed directory
+`outputs/deepseek_zero_reward_subproblems_all`.
+
 For the RL trainer, clone the official baseline next to this repository and
 install the optional curriculum hook:
 

@@ -5,7 +5,9 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_FILE="${DATA_FILE:-$PROJECT_ROOT/data/DeepScaleR/Qwen2.5-Math-1.5B.parquet}"
 LIMIT="${LIMIT:-64}"
 MODEL="${DEEPSEEK_MODEL:-deepseek-v4-pro}"
-RUN_NAME="${RUN_NAME:-deepseek_subproblems_n${LIMIT}}"
+DIMENSIONS="${DIMENSIONS:-calculation}"
+MAX_SOURCE_ACCURACY="${MAX_SOURCE_ACCURACY:-0.9}"
+RUN_NAME="${RUN_NAME:-deepseek_subproblems_n${LIMIT}_${DIMENSIONS//,/-}_acc${MAX_SOURCE_ACCURACY}}"
 RUN_ROOT="${RUN_ROOT:-$PROJECT_ROOT/outputs/$RUN_NAME}"
 
 if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
@@ -27,6 +29,8 @@ python "$PROJECT_ROOT/generate_subproblems_deepseek.py" \
   --summary "$RUN_ROOT/summary.json" \
   --limit "$LIMIT" \
   --model "$MODEL" \
+  --dimensions "$DIMENSIONS" \
+  --max-source-accuracy "$MAX_SOURCE_ACCURACY" \
   2>&1 | tee -a "$RUN_ROOT/generation.log"
 
 echo "Generation complete: $RUN_ROOT"

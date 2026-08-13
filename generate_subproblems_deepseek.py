@@ -19,6 +19,19 @@ from typing import Any
 
 DEFAULT_API_URL = "https://api.deepseek.com/chat/completions"
 DEFAULT_MODEL = "deepseek-v4-pro"
+DIMENSION_GUIDANCE = {
+    "knowledge": (
+        "Create a small exact-answer question that tests application of a concept, theorem, "
+        "or formula required by the root solution."
+    ),
+    "planning": (
+        "Turn a key plan choice or intermediate target into a self-contained exact-answer "
+        "question; do not ask an open-ended 'which method' question."
+    ),
+    "calculation": (
+        "Extract a useful intermediate numerical or symbolic calculation with a short exact answer."
+    ),
+}
 
 
 def as_text(value: Any) -> str:
@@ -56,13 +69,41 @@ def stable_id(source_id: str, question: str) -> str:
     return f"{source_id}::{digest}"
 
 
-def build_prompt(row: dict[str, Any], question: str, reference: str) -> str:
+def parse_dimensions(value: str) -> tuple[str, ...]:
+    dimensions = tuple(dict.fromkeys(item.strip() for item in value.split(",") if item.strip()))
+    invalid = [item for item in dimensions if item not in DIMENSION_GUIDANCE]
+    if not dimensions or invalid:
+        raise ValueError(
+            "dimensions must be a comma-separated subset of "
+            f"{','.join(DIMENSION_GUIDANCE)}; invalid={invalid}"
+        )
+    return dimensions
+
+
+def candidate_id(root_id: str, dimension: str) -> str:
+    return f"{root_id}::{dimension}"
+
+
+def build_prompt(
+    row: dict[str, Any],
+    question: str,
+    reference: str,
+    dimensions: tuple[str, ...] = ("calculation",),
+) -> str:
     knowledge = as_text(row.get("knowledge_components_parts"))[:5000]
     planning = as_text(row.get("planning_skeleton_parts"))[:5000]
     breakdown = as_text(row.get("solution_breakdown_parts"))[:7000]
     solution = reference_solution(row, reference)[:7000]
+    dimension_rules = "\n".join(
+        f'- "{dimension}": {DIMENSION_GUIDANCE[dimension]}' for dimension in dimensions
+    )
+    schema = ",\n".join(
+        f'    "{dimension}": {{"subproblem": "...", "answer": "...", '
+        '"relation": "...", "source_step": "...", "verification": "..."}'
+        for dimension in dimensions
+    )
     return f"""
-Create exactly one easier prerequisite subproblem for the original math problem.
+Create one easier prerequisite subproblem for each requested dimension of the original math problem.
 
 Rules:
 1. The subproblem must be self-contained and independently solvable.
@@ -71,10 +112,16 @@ Rules:
 4. It must have one short, exact answer suitable for automatic checking.
 5. It must not ask for, copy, or reveal the original final answer.
 6. Prefer turning an intermediate computation from the supplied scaffold into a question.
-7. Do not merely restate the original problem and do not provide several subproblems.
-8. Return one JSON object with exactly these string fields:
-   "subproblem", "answer", "relation", "source_step", "verification".
-9. "verification" must briefly derive the subproblem answer, not the original answer.
+7. Do not merely restate the original problem. The candidates must be meaningfully different.
+8. Requested dimensions:
+{dimension_rules}
+9. Return exactly this JSON shape and no extra keys:
+{{
+  "candidates": {{
+{schema}
+  }}
+}}
+10. Each "verification" must briefly derive its subproblem answer, not the original answer.
 
 Original problem:
 {question}
@@ -113,9 +160,29 @@ def parse_candidate(content: str) -> dict[str, str]:
     return result
 
 
+def parse_candidate_set(content: str, dimensions: tuple[str, ...]) -> dict[str, dict[str, str]]:
+    value = json.loads(content)
+    if not isinstance(value, dict) or not isinstance(value.get("candidates"), dict):
+        raise ValueError("response does not contain a candidates JSON object")
+    candidates = value["candidates"]
+    missing = [dimension for dimension in dimensions if dimension not in candidates]
+    if missing:
+        raise ValueError(f"response is missing candidate dimensions: {missing}")
+    return {
+        dimension: parse_candidate(json.dumps(candidates[dimension], ensure_ascii=False))
+        for dimension in dimensions
+    }
+
+
 def request_candidate(
-    *, api_key: str, api_url: str, model: str, prompt: str, timeout: int
-) -> tuple[dict[str, str], dict[str, Any], str]:
+    *,
+    api_key: str,
+    api_url: str,
+    model: str,
+    prompt: str,
+    dimensions: tuple[str, ...],
+    timeout: int,
+) -> tuple[dict[str, dict[str, str]], dict[str, Any], str]:
     payload = {
         "model": model,
         "messages": [
@@ -146,7 +213,7 @@ def request_candidate(
         response_value = json.loads(response.read().decode("utf-8"))
     choice = response_value["choices"][0]
     content = choice["message"].get("content") or ""
-    return parse_candidate(content), response_value.get("usage", {}), choice.get(
+    return parse_candidate_set(content, dimensions), response_value.get("usage", {}), choice.get(
         "finish_reason", ""
     )
 
@@ -196,6 +263,45 @@ def select_rows(
     return eligible[:limit] if limit > 0 else eligible, len(eligible)
 
 
+def build_summary(
+    *,
+    args: argparse.Namespace,
+    dimensions: tuple[str, ...],
+    eligible_count: int,
+    selected_count: int,
+    completed_before_run: int,
+    completed_count: int,
+    success: int,
+    skipped: int,
+    failure: int,
+    reasons: Counter[str],
+    usage_totals: Counter[str],
+) -> dict[str, Any]:
+    return {
+        "generator_model": args.model,
+        "data": str(args.data.resolve()),
+        "output": str(args.output.resolve()),
+        "eligible_rows": eligible_count,
+        "selected_rows": selected_count,
+        "requested_dimensions": list(dimensions),
+        "requested_candidates": selected_count * len(dimensions),
+        "completed_before_run": completed_before_run,
+        "success_this_run": success,
+        "skipped_this_run": skipped,
+        "failed_roots_this_run": failure,
+        "total_output_rows": completed_count,
+        "failure_reasons": dict(reasons),
+        "usage_this_run": dict(usage_totals),
+        "seed": args.seed,
+        "max_source_accuracy": args.max_source_accuracy,
+        "important_limitation": (
+            "These are teacher-generated candidates, not validated training examples. "
+            "They still require leakage checks, answer verification, student q calibration, "
+            "and a matched relevance control."
+        ),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate scaffold-grounded subproblem candidates using DeepSeek JSON mode."
@@ -207,6 +313,11 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=64, help="0 means all eligible rows")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--max-source-accuracy", type=float, default=0.9)
+    parser.add_argument(
+        "--dimensions",
+        default="calculation",
+        help="Comma-separated subset of knowledge,planning,calculation",
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--api-url", default=DEFAULT_API_URL)
     parser.add_argument("--api-key-env", default="DEEPSEEK_API_KEY")
@@ -220,6 +331,10 @@ def main() -> None:
         raise SystemExit(f"Missing API key environment variable: {args.api_key_env}")
     if args.limit < 0:
         raise SystemExit("--limit must be non-negative")
+    try:
+        dimensions = parse_dimensions(args.dimensions)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     errors = args.errors or args.output.with_name(args.output.stem + "_errors.jsonl")
@@ -239,54 +354,82 @@ def main() -> None:
 
     print(
         f"eligible={eligible_count} selected={len(rows)} already_completed={len(completed)} "
-        f"model={args.model}",
+        f"model={args.model} dimensions={','.join(dimensions)}",
         flush=True,
     )
     for index, row in enumerate(rows, 1):
         question = as_text(row.get("question")).strip()
         source_id = as_text(row.get("id")).strip()
         reference = ground_truth(row)
-        item_id = stable_id(source_id, question)
-        if item_id in completed:
-            skipped += 1
-            print(f"[{index}/{len(rows)}] skip {item_id}", flush=True)
+        root_id = stable_id(source_id, question)
+        missing_dimensions = tuple(
+            dimension
+            for dimension in dimensions
+            if candidate_id(root_id, dimension) not in completed
+        )
+        if not missing_dimensions:
+            skipped += len(dimensions)
+            print(f"[{index}/{len(rows)}] skip {root_id}", flush=True)
+            summary = build_summary(
+                args=args,
+                dimensions=dimensions,
+                eligible_count=eligible_count,
+                selected_count=len(rows),
+                completed_before_run=completed_before_run,
+                completed_count=len(completed),
+                success=success,
+                skipped=skipped,
+                failure=failure,
+                reasons=reasons,
+                usage_totals=usage_totals,
+            )
+            summary_path.write_text(
+                json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
             continue
 
-        prompt = build_prompt(row, question, reference)
+        prompt = build_prompt(row, question, reference, missing_dimensions)
         last_error = ""
         for attempt in range(1, args.retries + 1):
             try:
-                candidate, usage, finish_reason = request_candidate(
+                candidates, usage, finish_reason = request_candidate(
                     api_key=api_key,
                     api_url=args.api_url,
                     model=args.model,
                     prompt=prompt,
+                    dimensions=missing_dimensions,
                     timeout=args.timeout,
                 )
-                validate_candidate(candidate, reference)
-                record = {
-                    "id": item_id,
-                    "source_id": source_id,
-                    "question": question,
-                    "reference": reference,
-                    "subproblem": candidate["subproblem"],
-                    "subproblem_answer": candidate["answer"],
-                    "relation": candidate["relation"],
-                    "source_step": candidate["source_step"],
-                    "verification": candidate["verification"],
-                    "generator_model": args.model,
-                    "finish_reason": finish_reason,
-                    "usage": usage,
-                }
-                append_jsonl(args.output, record)
+                for candidate in candidates.values():
+                    validate_candidate(candidate, reference)
+                for dimension, candidate in candidates.items():
+                    item_id = candidate_id(root_id, dimension)
+                    record = {
+                        "id": item_id,
+                        "root_id": root_id,
+                        "dimension": dimension,
+                        "source_id": source_id,
+                        "question": question,
+                        "reference": reference,
+                        "subproblem": candidate["subproblem"],
+                        "subproblem_answer": candidate["answer"],
+                        "relation": candidate["relation"],
+                        "source_step": candidate["source_step"],
+                        "verification": candidate["verification"],
+                        "generator_model": args.model,
+                        "finish_reason": finish_reason,
+                        "usage": usage,
+                    }
+                    append_jsonl(args.output, record)
+                    completed.add(item_id)
+                    success += 1
                 for key, value in usage.items():
                     if isinstance(value, int):
                         usage_totals[key] += value
-                completed.add(item_id)
-                success += 1
                 print(
-                    f"[{index}/{len(rows)}] OK {item_id}: "
-                    f"{candidate['subproblem'][:100]}",
+                    f"[{index}/{len(rows)}] OK {root_id}: "
+                    f"{','.join(missing_dimensions)}",
                     flush=True,
                 )
                 break
@@ -306,61 +449,46 @@ def main() -> None:
             append_jsonl(
                 errors,
                 {
-                    "id": item_id,
+                    "id": root_id,
                     "source_id": source_id,
                     "question": question,
+                    "dimensions": list(missing_dimensions),
                     "error": last_error,
                     "generator_model": args.model,
                 },
             )
 
-        summary = {
-            "generator_model": args.model,
-            "data": str(args.data.resolve()),
-            "output": str(args.output.resolve()),
-            "eligible_rows": eligible_count,
-            "selected_rows": len(rows),
-            "completed_before_run": completed_before_run,
-            "success_this_run": success,
-            "skipped_this_run": skipped,
-            "failed_this_run": failure,
-            "total_output_rows": len(completed),
-            "failure_reasons": dict(reasons),
-            "usage_this_run": dict(usage_totals),
-            "seed": args.seed,
-            "max_source_accuracy": args.max_source_accuracy,
-            "important_limitation": (
-                "These are teacher-generated candidates, not validated training examples. "
-                "They still require leakage checks, answer verification, student q calibration, "
-                "and a matched relevance control."
-            ),
-        }
+        summary = build_summary(
+            args=args,
+            dimensions=dimensions,
+            eligible_count=eligible_count,
+            selected_count=len(rows),
+            completed_before_run=completed_before_run,
+            completed_count=len(completed),
+            success=success,
+            skipped=skipped,
+            failure=failure,
+            reasons=reasons,
+            usage_totals=usage_totals,
+        )
         summary_path.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
 
     if not rows:
-        summary = {
-            "generator_model": args.model,
-            "data": str(args.data.resolve()),
-            "output": str(args.output.resolve()),
-            "eligible_rows": eligible_count,
-            "selected_rows": 0,
-            "completed_before_run": completed_before_run,
-            "success_this_run": 0,
-            "skipped_this_run": 0,
-            "failed_this_run": 0,
-            "total_output_rows": len(completed),
-            "failure_reasons": {},
-            "usage_this_run": {},
-            "seed": args.seed,
-            "max_source_accuracy": args.max_source_accuracy,
-            "important_limitation": (
-                "These are teacher-generated candidates, not validated training examples. "
-                "They still require leakage checks, answer verification, student q calibration, "
-                "and a matched relevance control."
-            ),
-        }
+        summary = build_summary(
+            args=args,
+            dimensions=dimensions,
+            eligible_count=eligible_count,
+            selected_count=0,
+            completed_before_run=completed_before_run,
+            completed_count=len(completed),
+            success=0,
+            skipped=0,
+            failure=0,
+            reasons=Counter(),
+            usage_totals=Counter(),
+        )
         summary_path.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
         )
