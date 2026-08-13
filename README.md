@@ -1,5 +1,40 @@
 # Adaptive Scaffold Experiment
 
+## Current focus: verifiable subproblem GRPO
+
+The current research target is the training-time subproblem idea, not the
+older dynamic-hint router.  The fair first comparison is:
+
+1. Vanilla GRPO on a matched set of hard roots.
+2. Mixed GRPO on the same roots plus their calibrated, self-contained,
+   verifiable subproblems at a 1:1 ratio.
+
+The decomposition teacher is used offline only.  The policy model estimates
+each candidate's success rate `q`; only candidates in the configurable
+learning band are retained.  A relevant candidate must also beat a
+length-matched random-subproblem control before RL is launched.
+
+Download the small instruction-tuned decomposition teacher on the networked
+instance:
+
+```bash
+ENV_NAME=scaf-grpo bash scripts/download_subproblem_teacher.sh
+```
+
+Then run the feasibility gate and the two sequential one-step H100 training
+checks on the offline instance:
+
+```bash
+conda activate scaf-grpo
+ENV_NAME=scaf-grpo LIMIT=64 SAMPLES=4 \
+  bash scripts/run_vanilla_then_subproblem_smoke_2h100.sh
+```
+
+This smoke run uses zero DataLoader subprocesses to avoid the CPU-memory kill
+seen in the earlier baseline logs.  It is a mechanism check, not a final paper
+result.  Scale both arms to identical steps/tokens only after the feasibility
+gate passes.
+
 ## Qwen2.5-Math-1.5B paper reproduction
 
 The paper-facing sequence is Base, Vanilla GRPO, Scaf-GRPO, and then the new

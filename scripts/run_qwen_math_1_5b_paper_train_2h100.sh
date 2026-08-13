@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_ROOT="${PROJECT_ROOT_OVERRIDE:-$PROJECT_ROOT}"
 SCAF_REPO="${SCAF_REPO:-$(dirname "$PROJECT_ROOT")/Scaf-GRPO}"
 MODEL_PATH="${MODEL_PATH:-$PROJECT_ROOT/models/Qwen2.5-Math-1.5B}"
 TRAIN_DATA="${TRAIN_DATA:-$PROJECT_ROOT/data/DeepScaleR/Qwen2.5-Math-1.5B.parquet}"
@@ -9,6 +10,8 @@ METHOD="${METHOD:-vanilla}"
 MODE="${MODE:-smoke}"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-0}"
+SKIP_ASSET_VALIDATION="${SKIP_ASSET_VALIDATION:-0}"
 
 if [[ "$METHOD" != "vanilla" && "$METHOD" != "scaf" ]]; then
   echo "METHOD must be vanilla or scaf" >&2; exit 1
@@ -22,8 +25,10 @@ fi
 
 export CUDA_VISIBLE_DEVICES HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 export HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false WANDB_MODE=disabled
-"$PYTHON_BIN" "$PROJECT_ROOT/scripts/prepare_qwen_math_1_5b_repro.py" \
-  --project-root "$PROJECT_ROOT" --scaf-repo "$SCAF_REPO" --validate-only >/dev/null
+if [[ "$SKIP_ASSET_VALIDATION" != "1" ]]; then
+  "$PYTHON_BIN" "$PROJECT_ROOT/scripts/prepare_qwen_math_1_5b_repro.py" \
+    --project-root "$PROJECT_ROOT" --scaf-repo "$SCAF_REPO" --validate-only >/dev/null
+fi
 
 timestamp="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/outputs/qwen_math_1_5b_${METHOD}_${MODE}_$timestamp}"
@@ -56,6 +61,7 @@ VAL_FILES="['$SCAF_REPO/data/AIME24/math-verify/system-p1/test.parquet','$SCAF_R
 args=(
   algorithm.adv_estimator=grpo "data.train_files=$TRAIN_DATA" "data.val_files=$VAL_FILES"
   "data.train_batch_size=$TRAIN_BATCH_SIZE" data.val_batch_size=512
+  "data.dataloader_num_workers=$DATALOADER_NUM_WORKERS"
   "data.max_prompt_length=$MAX_PROMPT_LENGTH" data.filter_overlong_prompts=true
   data.truncation=error "data.max_response_length=$MAX_RESPONSE_LENGTH"
   "actor_rollout_ref.model.path=$MODEL_PATH"

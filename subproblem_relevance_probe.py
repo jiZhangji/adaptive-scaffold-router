@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import gc
 import json
 import re
 from collections import defaultdict
@@ -17,12 +19,42 @@ from metaask_probe import LocalGenerator, _reference_solution, chat_prompt
 
 
 def parse_subproblem(text: str) -> tuple[str, str] | None:
+    """Parse a teacher candidate without requiring one brittle output format."""
     question_match = re.search(r"<subproblem>(.*?)</subproblem>", text, re.I | re.S)
     answer_match = re.search(r"<answer>(.*?)</answer>", text, re.I | re.S)
-    if not question_match or not answer_match:
-        return None
-    question = " ".join(question_match.group(1).split())
-    answer = " ".join(answer_match.group(1).split())
+    if question_match and answer_match:
+        question = " ".join(question_match.group(1).split())
+        answer = " ".join(answer_match.group(1).split())
+    else:
+        # Instruction-tuned teachers sometimes wrap the requested object in a
+        # Markdown JSON fence even when XML tags were requested.
+        object_match = re.search(r"\{.*\}", text, re.S)
+        parsed = None
+        if object_match:
+            try:
+                value = json.loads(object_match.group(0))
+                if isinstance(value, dict):
+                    parsed = value
+            except json.JSONDecodeError:
+                parsed = None
+        if parsed is not None:
+            question = " ".join(
+                str(parsed.get("subproblem", parsed.get("question", ""))).split()
+            )
+            answer = " ".join(
+                str(parsed.get("answer", parsed.get("target", ""))).split()
+            )
+        else:
+            question_line = re.search(
+                r"(?:subproblem|question)\s*:\s*(.+?)(?=\n\s*(?:answer|target)\s*:|$)",
+                text,
+                re.I | re.S,
+            )
+            answer_line = re.search(r"(?:answer|target)\s*:\s*([^\n]+)", text, re.I)
+            if not question_line or not answer_line:
+                return None
+            question = " ".join(question_line.group(1).split())
+            answer = " ".join(answer_line.group(1).split())
     if not question or not answer:
         return None
     return question, answer
@@ -33,11 +65,19 @@ def _normalise_answer(text: str) -> str:
     return re.sub(r"[\s{}$]", "", value).lower()
 
 
+def _validate_q_band(q_low: float, q_high: float) -> None:
+    if not 0.0 <= q_low <= q_high <= 1.0:
+        raise ValueError("q band must satisfy 0 <= q_low <= q_high <= 1")
+
+
 def analyze_records(
     candidates: list[dict[str, Any]],
     root_records: list[dict[str, Any]],
     subproblem_records: list[dict[str, Any]],
+    q_low: float = 0.25,
+    q_high: float = 0.75,
 ) -> dict[str, Any]:
+    _validate_q_band(q_low, q_high)
     by_variant: dict[str, list[dict[str, Any]]] = defaultdict(list)
     paired: dict[tuple[str, int], dict[str, bool]] = defaultdict(dict)
     for record in root_records:
@@ -70,12 +110,33 @@ def analyze_records(
         if subproblem_records
         else 0.0
     )
+    subproblem_by_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in subproblem_records:
+        subproblem_by_id[str(row["id"])].append(row)
+    q_by_id = {
+        item_id: sum(bool(row["correct"]) for row in rows) / len(rows)
+        for item_id, rows in subproblem_by_id.items()
+    }
+    trainable = {
+        item_id: q for item_id, q in q_by_id.items() if q_low <= q <= q_high
+    }
     return {
         "experiment": "causal subproblem relevance probe",
         "candidate_generation": {
             "valid_candidates": len(candidates),
         },
         "subproblem_solve_accuracy": subproblem_accuracy,
+        "q_calibration": {
+            "q_low": q_low,
+            "q_high": q_high,
+            "candidate_count": len(q_by_id),
+            "trainable_candidate_count": len(trainable),
+            "trainable_candidate_rate": (
+                len(trainable) / len(q_by_id) if q_by_id else 0.0
+            ),
+            "mean_q": sum(q_by_id.values()) / len(q_by_id) if q_by_id else 0.0,
+            "q_by_id": q_by_id,
+        },
         "variants": variants,
         "causal_checks": {
             "relevant_gain_over_no_help": relevant - no_help,
@@ -95,11 +156,18 @@ def analyze_records(
 
 
 def run(args: argparse.Namespace) -> None:
+    _validate_q_band(args.q_low, args.q_high)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     rows, eligible = load_probe_rows(args.data, args.limit, args.seed, args.max_source_accuracy)
-    generator = LocalGenerator(args)
-    tokenizer = generator.tokenizer
     verifier = build_math_verifier()
+
+    teacher_args = copy.copy(args)
+    teacher_args.model = args.teacher_model or args.model
+    teacher_args.device = args.teacher_device or args.device
+    teacher_args.temperature = args.teacher_temperature
+    teacher_args.top_p = args.teacher_top_p
+    teacher_generator = LocalGenerator(teacher_args)
+    tokenizer = teacher_generator.tokenizer
 
     teacher_prompts = []
     row_meta = []
@@ -114,15 +182,56 @@ def run(args: argparse.Namespace) -> None:
                 "Create one self-contained, independently checkable mathematical subproblem "
                 "whose result is genuinely used by the reference solution. It must be easier "
                 "than the original and must not simply ask for the original final answer. "
-                "Return exactly <subproblem>...</subproblem><answer>...</answer>.\n\n"
+                "The answer must be a short exact mathematical value that can be checked by "
+                "a final-answer verifier. Do not include a proof in <answer>. Return exactly "
+                "<subproblem>...</subproblem><answer>...</answer>.\n\n"
                 f"Original problem: {question}\nReference solution: {solution}",
             )
         )
         row_meta.append((row, question, reference))
 
-    teacher_outputs = generator.generate(
+    teacher_outputs = teacher_generator.generate(
         teacher_prompts, args.teacher_max_new_tokens, args.seed + 5000
     )
+
+    # A base model often echoes the requested format. Retry only malformed
+    # candidates with a shorter repair prompt rather than discarding the root.
+    for retry in range(args.teacher_retries):
+        failed = [index for index, output in enumerate(teacher_outputs) if parse_subproblem(output["text"]) is None]
+        if not failed:
+            break
+        repair_prompts = [
+            chat_prompt(
+                tokenizer,
+                "You format mathematical training data. Output XML only.",
+                "Rewrite the candidate below as exactly one self-contained easier question and "
+                "one short exact answer. Output only "
+                "<subproblem>...</subproblem><answer>...</answer>.\n\n"
+                f"Candidate:\n{teacher_outputs[index]['text']}",
+            )
+            for index in failed
+        ]
+        repaired = teacher_generator.generate(
+            repair_prompts, args.teacher_max_new_tokens, args.seed + 5100 + retry
+        )
+        for index, output in zip(failed, repaired):
+            teacher_outputs[index] = output
+
+    if (args.teacher_model or args.model) == args.model and teacher_args.device == args.device:
+        generator = teacher_generator
+        generator.args = args
+    else:
+        del teacher_generator
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+        generator = LocalGenerator(args)
+        tokenizer = generator.tokenizer
     candidates = []
     rejected = []
     for (row, question, reference), generated in zip(row_meta, teacher_outputs):
@@ -155,7 +264,7 @@ def run(args: argparse.Namespace) -> None:
             with (args.output_dir / filename).open("w", encoding="utf-8") as handle:
                 for record in records:
                     handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-        summary = analyze_records(candidates, [], [])
+        summary = analyze_records(candidates, [], [], args.q_low, args.q_high)
         summary.update(
             {
                 "eligible_questions": eligible,
@@ -293,7 +402,20 @@ def run(args: argparse.Namespace) -> None:
             for record in records:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    summary = analyze_records(candidates, root_records, subproblem_records)
+    summary = analyze_records(
+        candidates, root_records, subproblem_records, args.q_low, args.q_high
+    )
+    q_by_id = summary["q_calibration"]["q_by_id"]
+    trainable_candidates = []
+    for candidate in candidates:
+        q = q_by_id.get(candidate["id"])
+        candidate["success_probability"] = q
+        candidate["trainable"] = q is not None and args.q_low <= q <= args.q_high
+        if candidate["trainable"]:
+            trainable_candidates.append(candidate)
+    with (args.output_dir / "training_candidates.jsonl").open("w", encoding="utf-8") as handle:
+        for candidate in trainable_candidates:
+            handle.write(json.dumps(candidate, ensure_ascii=False) + "\n")
     summary.update(
         {
             "eligible_questions": eligible,
@@ -316,6 +438,12 @@ def parse_args() -> argparse.Namespace:
         description="Test whether generated verifiable subproblems causally help their roots."
     )
     parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--teacher-model",
+        default=None,
+        help="Instruction-following decomposition model; defaults to --model.",
+    )
+    parser.add_argument("--teacher-device", default=None)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda:0")
@@ -326,7 +454,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-input-tokens", type=int, default=3072)
     parser.add_argument("--max-new-tokens", type=int, default=1024)
     parser.add_argument("--teacher-max-new-tokens", type=int, default=256)
+    parser.add_argument("--teacher-retries", type=int, default=2)
+    parser.add_argument("--teacher-temperature", type=float, default=0.2)
+    parser.add_argument("--teacher-top-p", type=float, default=0.95)
     parser.add_argument("--subproblem-max-new-tokens", type=int, default=512)
+    parser.add_argument("--q-low", type=float, default=0.25)
+    parser.add_argument("--q-high", type=float, default=0.60)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--top-p", type=float, default=0.95)
     parser.add_argument("--seed", type=int, default=42)
