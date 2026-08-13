@@ -217,6 +217,28 @@ The current probe and RL smoke use `Qwen/Qwen2.5-Math-1.5B`; the 7B model is
 used only for the capability-frontier comparison. Download model weights on
 the GPU server, not on a local laptop.
 
+### DeepSeek subproblem candidate generation
+
+The local 1.5B teacher is not reliable enough for strict subproblem generation.
+The resumable DeepSeek generator instead grounds each candidate in the existing
+Scaf-GRPO knowledge, planning and solution-breakdown fields. Enter the API key
+without placing it in shell history, then run a 64-example quality screen:
+
+```bash
+read -rsp "DeepSeek API Key: " DEEPSEEK_API_KEY
+echo
+export DEEPSEEK_API_KEY
+LIMIT=64 bash scripts/generate_subproblems_deepseek.sh
+unset DEEPSEEK_API_KEY
+```
+
+The run directory is recorded in
+`outputs/latest_deepseek_subproblems.txt`. It contains `candidates.jsonl`,
+`errors.jsonl`, `summary.json`, and a resumable log. Generated candidates are
+not yet training examples: they must still pass answer verification, leakage
+checks, student success-probability calibration and the matched random-
+subproblem relevance control.
+
 For the RL trainer, clone the official baseline next to this repository and
 install the optional curriculum hook:
 
