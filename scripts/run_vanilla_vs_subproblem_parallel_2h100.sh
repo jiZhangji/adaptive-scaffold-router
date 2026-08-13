@@ -38,7 +38,9 @@ MIXED_DATA="$RUN_ROOT/data/mixed_train.parquet"
 echo "[2/2] Launch Vanilla on GPU 0 and subproblem GRPO on GPU 1 in parallel."
 run_train() {
   local gpu="$1" data="$2" output="$3" name="$4"
+  mkdir -p "$RUN_ROOT/ray_$name"
   CUDA_VISIBLE_DEVICES="$gpu" \
+  RAY_TMPDIR="$RUN_ROOT/ray_$name" RAY_ADDRESS="" \
   METHOD=vanilla MODE=smoke N_GPUS=1 TP_SIZE=1 \
   OVERRIDE_TOTAL_STEPS="$TRAIN_STEPS" DATALOADER_NUM_WORKERS=0 \
   SKIP_ASSET_VALIDATION=1 PROJECT_ROOT_OVERRIDE="$PROJECT_ROOT" \

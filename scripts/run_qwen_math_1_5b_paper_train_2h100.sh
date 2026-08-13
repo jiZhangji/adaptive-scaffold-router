@@ -27,6 +27,7 @@ if [[ "$MODE" == "paper" && "${CONFIRM_FULL_REPRO:-}" != "YES" ]]; then
 fi
 
 export CUDA_VISIBLE_DEVICES HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export VLLM_USE_V1=0
 export HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false WANDB_MODE=disabled
 if [[ "$SKIP_ASSET_VALIDATION" != "1" ]]; then
   "$PYTHON_BIN" "$PROJECT_ROOT/scripts/prepare_qwen_math_1_5b_repro.py" \
@@ -85,6 +86,8 @@ args=(
   actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.rollout.temperature=1.0
   "actor_rollout_ref.rollout.n=$ROLLOUTS" actor_rollout_ref.rollout.enable_chunked_prefill=false
   actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.60
+  actor_rollout_ref.rollout.load_format=safetensors actor_rollout_ref.rollout.free_cache_engine=false
+  actor_rollout_ref.rollout.enforce_eager=true
   "actor_rollout_ref.rollout.tensor_model_parallel_size=$TP_SIZE" actor_rollout_ref.actor.optim.lr=1e-6
   actor_rollout_ref.actor.optim.lr_warmup_steps=-1 actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.0
   actor_rollout_ref.actor.optim.warmup_style=constant actor_rollout_ref.actor.optim.weight_decay=0.0
