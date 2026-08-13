@@ -12,6 +12,9 @@ CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 DATALOADER_NUM_WORKERS="${DATALOADER_NUM_WORKERS:-0}"
 SKIP_ASSET_VALIDATION="${SKIP_ASSET_VALIDATION:-0}"
+N_GPUS="${N_GPUS:-2}"
+TP_SIZE="${TP_SIZE:-$N_GPUS}"
+OVERRIDE_TOTAL_STEPS="${OVERRIDE_TOTAL_STEPS:-}"
 
 if [[ "$METHOD" != "vanilla" && "$METHOD" != "scaf" ]]; then
   echo "METHOD must be vanilla or scaf" >&2; exit 1
@@ -49,6 +52,9 @@ else
   VAL_BEFORE_TRAIN=false
   TOTAL_STEPS_ARG=(trainer.total_training_steps=1)
 fi
+if [[ -n "$OVERRIDE_TOTAL_STEPS" ]]; then
+  TOTAL_STEPS_ARG=("trainer.total_training_steps=$OVERRIDE_TOTAL_STEPS")
+fi
 
 if [[ "$METHOD" == "scaf" ]]; then
   ENTRYPOINT=hint_mix_grpo.main_ppo; MAX_PROMPT_LENGTH=4096
@@ -79,10 +85,10 @@ args=(
   actor_rollout_ref.actor.entropy_coeff=0 actor_rollout_ref.rollout.temperature=1.0
   "actor_rollout_ref.rollout.n=$ROLLOUTS" actor_rollout_ref.rollout.enable_chunked_prefill=false
   actor_rollout_ref.rollout.name=vllm actor_rollout_ref.rollout.gpu_memory_utilization=0.60
-  actor_rollout_ref.rollout.tensor_model_parallel_size=2 actor_rollout_ref.actor.optim.lr=1e-6
+  "actor_rollout_ref.rollout.tensor_model_parallel_size=$TP_SIZE" actor_rollout_ref.actor.optim.lr=1e-6
   actor_rollout_ref.actor.optim.lr_warmup_steps=-1 actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.0
   actor_rollout_ref.actor.optim.warmup_style=constant actor_rollout_ref.actor.optim.weight_decay=0.0
-  trainer.nnodes=1 trainer.n_gpus_per_node=2 "trainer.total_epochs=$TOTAL_EPOCHS"
+  trainer.nnodes=1 "trainer.n_gpus_per_node=$N_GPUS" "trainer.total_epochs=$TOTAL_EPOCHS"
   "trainer.save_freq=$SAVE_FREQ" "trainer.test_freq=$TEST_FREQ"
   "trainer.val_before_train=$VAL_BEFORE_TRAIN" trainer.val_only=false trainer.resume_mode=disable
   "trainer.default_local_dir=$OUTPUT_DIR/checkpoints" "trainer.rollout_data_dir=$OUTPUT_DIR/rollout"
@@ -95,6 +101,6 @@ if [[ "$METHOD" == "scaf" ]]; then
 fi
 
 cd "$SCAF_REPO"
-echo "Starting $METHOD ($MODE) on two H100 GPUs. Output: $OUTPUT_DIR"
+echo "Starting $METHOD ($MODE) on $N_GPUS visible H100 GPU(s). Output: $OUTPUT_DIR"
 "$PYTHON_BIN" -m "$ENTRYPOINT" "${args[@]}" 2>&1 | tee "$OUTPUT_DIR/logs/train.log"
 echo "Training complete. Select the best validation checkpoint under $OUTPUT_DIR/checkpoints."
