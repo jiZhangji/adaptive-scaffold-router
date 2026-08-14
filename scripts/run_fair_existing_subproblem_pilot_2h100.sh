@@ -26,7 +26,9 @@ REQUIRE_FREE_GPUS="${REQUIRE_FREE_GPUS:-1}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_ROOT="${RUN_ROOT:-$PROJECT_ROOT/outputs/fair_subproblem_pilot_$TIMESTAMP}"
+RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/fair_sp_${UID}_$TIMESTAMP}"
 mkdir -p "$RUN_ROOT/logs"
+mkdir -p "$RAY_TMP_BASE"
 printf '%s\n' "$RUN_ROOT" > "$PROJECT_ROOT/outputs/latest_fair_subproblem_pilot.txt"
 printf '%s\n' "$$" > "$RUN_ROOT/pid.txt"
 
@@ -114,9 +116,10 @@ EOF
 
 run_arm() {
   local gpu="$1" label="$2" train_data="$3" output_dir="$4"
-  mkdir -p "$RUN_ROOT/ray_$label"
+  local ray_tmp="$RAY_TMP_BASE/$label"
+  mkdir -p "$ray_tmp"
   CUDA_VISIBLE_DEVICES="$gpu" \
-  RAY_TMPDIR="$RUN_ROOT/ray_$label" RAY_ADDRESS="" \
+  RAY_TMPDIR="$ray_tmp" RAY_ADDRESS="" \
   TRAIN_STEPS="$TRAIN_STEPS" TRAIN_BATCH_SIZE="$TRAIN_BATCH_SIZE" \
   ROLLOUTS="$ROLLOUTS" PPO_MINI_BATCH_SIZE="$PPO_MINI_BATCH_SIZE" \
   MAX_PROMPT_LENGTH="$MAX_PROMPT_LENGTH" \
