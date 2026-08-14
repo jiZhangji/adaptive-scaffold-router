@@ -26,7 +26,7 @@ REQUIRE_FREE_GPUS="${REQUIRE_FREE_GPUS:-1}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_ROOT="${RUN_ROOT:-$PROJECT_ROOT/outputs/fair_subproblem_pilot_$TIMESTAMP}"
-RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/fair_sp_${UID}_$TIMESTAMP}"
+RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/fp${UID}_$$}"
 mkdir -p "$RUN_ROOT/logs"
 mkdir -p "$RAY_TMP_BASE"
 printf '%s\n' "$RUN_ROOT" > "$PROJECT_ROOT/outputs/latest_fair_subproblem_pilot.txt"
@@ -116,7 +116,8 @@ EOF
 
 run_arm() {
   local gpu="$1" label="$2" train_data="$3" output_dir="$4"
-  local ray_tmp="$RAY_TMP_BASE/$label"
+  local ray_tag="${label:0:1}"
+  local ray_tmp="$RAY_TMP_BASE/$ray_tag"
   mkdir -p "$ray_tmp"
   CUDA_VISIBLE_DEVICES="$gpu" \
   RAY_TMPDIR="$ray_tmp" RAY_ADDRESS="" \
