@@ -439,3 +439,25 @@ after the dry run succeeds and both GPUs are idle.
 packages whose current releases otherwise pull incompatible Transformers 5,
 NumPy 2, or CUDA 13 dependencies. FlashAttention is optional because the
 two-GPU smoke configuration does not require remove-padding kernels.
+
+## Compute-matched existing-subproblem pilot
+
+After `scripts/prepare_existing_subproblem_pilot_4090.sh` has produced the
+matched `root_train.parquet` and `mixed_train.parquet`, run:
+
+```bash
+SCAF_REPO=/absolute/path/to/Scaf-GRPO \
+bash scripts/run_fair_existing_subproblem_pilot_2h100.sh
+```
+
+The default protocol uses two idle 80 GB GPUs. GPU 0 trains Vanilla GRPO on
+the 186 matched roots, while GPU 1 trains the 1:1 root/subproblem stream. Both
+arms use 50 optimizer steps, 32 prompts per step, 8 rollouts per prompt, and a
+2048-token response ceiling. The final fixed-step checkpoints are merged and
+evaluated sequentially with the same seven-benchmark greedy pass@1 protocol.
+The resulting comparison is written to `fair_pilot_results.md` under the run
+directory recorded in `outputs/latest_fair_subproblem_pilot.txt`.
+
+This is a compute-matched mechanism pilot. It does not apply the matched-random
+causal relevance filter and it is not a substitute for multi-seed full-scale
+training.
