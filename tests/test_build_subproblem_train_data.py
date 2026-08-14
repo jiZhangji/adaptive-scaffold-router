@@ -27,6 +27,7 @@ class BuildSubproblemTrainDataTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["question"], "Hard question")
         self.assertEqual(rows[1]["question"], "Compute 2+3.")
+        self.assertEqual(rows[1]["data_source"], "math")
         self.assertEqual(rows[1]["reward_model"]["ground_truth"], "5")
         self.assertEqual(rows[1]["knowledge_components_parts"], [])
         self.assertTrue(rows[1]["extra_info"]["is_subproblem"])

@@ -12,7 +12,7 @@ ENV_NAME="${ENV_NAME:-scaf-grpo}"
 MODEL_PATH="${MODEL_PATH:-$PROJECT_ROOT/models/Qwen2.5-Math-1.5B}"
 PILOT_ROOT="${PILOT_ROOT:-$PROJECT_ROOT/outputs/existing_subproblem_pilot_n256}"
 ROOT_DATA="${ROOT_DATA:-$PILOT_ROOT/root_train.parquet}"
-MIXED_DATA="${MIXED_DATA:-$PILOT_ROOT/mixed_train.parquet}"
+MIXED_SOURCE_DATA="${MIXED_DATA:-$PILOT_ROOT/mixed_train.parquet}"
 
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
 TRAIN_BATCH_SIZE="${TRAIN_BATCH_SIZE:-32}"
@@ -27,6 +27,7 @@ REQUIRE_FREE_GPUS="${REQUIRE_FREE_GPUS:-1}"
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 RUN_ROOT="${RUN_ROOT:-$PROJECT_ROOT/outputs/fair_subproblem_pilot_$TIMESTAMP}"
 RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/fp${UID}_$$}"
+MIXED_DATA="$RUN_ROOT/mixed_train_reward_compatible.parquet"
 mkdir -p "$RUN_ROOT/logs"
 mkdir -p "$RAY_TMP_BASE"
 printf '%s\n' "$RUN_ROOT" > "$PROJECT_ROOT/outputs/latest_fair_subproblem_pilot.txt"
@@ -38,7 +39,7 @@ export WANDB_MODE=disabled HYDRA_FULL_ERROR=1 PYTHONHASHSEED=42
 for path in \
   "$MODEL_PATH/config.json" \
   "$ROOT_DATA" \
-  "$MIXED_DATA" \
+  "$MIXED_SOURCE_DATA" \
   "$SCAF_REPO/data/AIME24/math-verify/system-p1/test.parquet"; do
   [[ -s "$path" ]] || { echo "Missing required offline asset: $path" >&2; exit 2; }
 done
@@ -59,7 +60,8 @@ if [[ "$REQUIRE_FREE_GPUS" == "1" ]]; then
 fi
 
 conda run --no-capture-output -n "$ENV_NAME" python - \
-  "$ROOT_DATA" "$MIXED_DATA" "$PILOT_ROOT/calibration/summary.json" \
+  "$ROOT_DATA" "$MIXED_SOURCE_DATA" "$MIXED_DATA" \
+  "$PILOT_ROOT/calibration/summary.json" \
   "$RUN_ROOT/data_validation.json" <<'PY'
 import json
 import sys
@@ -67,9 +69,18 @@ from pathlib import Path
 
 import pandas as pd
 
-root_path, mixed_path, calibration_path, output_path = map(Path, sys.argv[1:])
+root_path, mixed_source_path, mixed_path, calibration_path, output_path = map(Path, sys.argv[1:])
 root = pd.read_parquet(root_path)
-mixed = pd.read_parquet(mixed_path)
+mixed = pd.read_parquet(mixed_source_path)
+
+# Older pilot data used a synthetic `::verifiable_subproblem` suffix.  That
+# suffix is useful as metadata but is not a registered verl reward source.
+# Normalize it into the official math-verify source before training.
+if "data_source" in mixed:
+    mixed["data_source"] = mixed["data_source"].map(
+        lambda value: str(value).removesuffix("::verifiable_subproblem")
+    )
+mixed.to_parquet(mixed_path, index=False)
 if len(root) == 0 or len(mixed) != 2 * len(root):
     raise SystemExit(
         f"Expected non-empty 1:1 matched data; root={len(root)}, mixed={len(mixed)}"

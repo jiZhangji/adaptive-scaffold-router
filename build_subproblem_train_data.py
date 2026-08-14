@@ -47,7 +47,10 @@ def _subproblem_row(root: dict[str, Any], candidate: dict[str, Any]) -> dict[str
     # Keep the physical dtype of the official `id` column.  The unique child
     # identity lives in extra_info, avoiding a mixed int/string parquet column.
     row["id"] = root.get("id")
-    row["data_source"] = f"{root.get('data_source', 'math')}::verifiable_subproblem"
+    # Keep the official math-verify data source so verl dispatches the same
+    # rule-based reward function.  The subproblem identity is carried in
+    # extra_info instead of inventing an unsupported reward data source.
+    row["data_source"] = root.get("data_source", "math")
     extra = copy.deepcopy(row.get("extra_info") or {})
     extra.update(
         {
