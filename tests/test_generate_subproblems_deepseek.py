@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from generate_subproblems_deepseek import (
     build_prompt,
@@ -8,6 +10,7 @@ from generate_subproblems_deepseek import (
     parse_candidate,
     parse_candidate_set,
     parse_dimensions,
+    read_terminal_failures,
     select_rows,
     stable_id,
     validate_candidate,
@@ -119,6 +122,29 @@ class GenerateSubproblemsDeepSeekTest(unittest.TestCase):
         )
         self.assertEqual(summary["requested_candidates"], 30)
         self.assertEqual(summary["total_output_rows"], 30)
+
+    def test_resume_skips_only_terminal_leakage_failures(self):
+        rows = [
+            {
+                "id": "leak",
+                "error": "ValueError: subproblem answer equals the original final answer",
+            },
+            {
+                "id": "paid",
+                "error": "HTTPError: HTTP Error 402: Payment Required",
+            },
+            {
+                "id": "json",
+                "error": "JSONDecodeError: Unterminated string",
+            },
+            {"id": "explicit", "error": "other", "terminal": True},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "errors.jsonl"
+            path.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+            )
+            self.assertEqual(read_terminal_failures(path), {"leak", "explicit"})
 
 
 if __name__ == "__main__":

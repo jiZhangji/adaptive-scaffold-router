@@ -32,6 +32,10 @@ DIMENSION_GUIDANCE = {
         "Extract a useful intermediate numerical or symbolic calculation with a short exact answer."
     ),
 }
+TERMINAL_VALIDATION_ERRORS = (
+    "subproblem answer equals the original final answer",
+    "subproblem text equals the original final answer",
+)
 
 
 def as_text(value: Any) -> str:
@@ -236,6 +240,32 @@ def read_completed(path: Path) -> set[str]:
     return completed
 
 
+def is_terminal_validation_error(error: str) -> bool:
+    return any(message in error for message in TERMINAL_VALIDATION_ERRORS)
+
+
+def read_terminal_failures(path: Path) -> set[str]:
+    """Read roots that exhausted retries on deterministic leakage checks.
+
+    HTTP, timeout, and malformed-JSON failures remain retryable after a resume.
+    Older error rows did not contain the explicit ``terminal`` field, so the
+    exact leakage message is also recognized for backward compatibility.
+    """
+    failed: set[str] = set()
+    if not path.exists():
+        return failed
+    with path.open(encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            value = json.loads(line)
+            if value.get("terminal") is True or is_terminal_validation_error(
+                as_text(value.get("error"))
+            ):
+                failed.add(str(value["id"]))
+    return failed
+
+
 def append_jsonl(path: Path, value: dict[str, Any]) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(value, ensure_ascii=False) + "\n")
@@ -347,6 +377,7 @@ def main() -> None:
         all_rows, args.limit, args.seed, args.max_source_accuracy
     )
     completed = read_completed(args.output)
+    terminal_failures = read_terminal_failures(errors)
     completed_before_run = len(completed)
     success = skipped = failure = 0
     reasons: Counter[str] = Counter()
@@ -367,6 +398,31 @@ def main() -> None:
             for dimension in dimensions
             if candidate_id(root_id, dimension) not in completed
         )
+        if root_id in terminal_failures and missing_dimensions:
+            skipped += len(missing_dimensions)
+            print(
+                f"[{index}/{len(rows)}] skip-terminal {root_id}: "
+                f"{','.join(missing_dimensions)}",
+                flush=True,
+            )
+            summary = build_summary(
+                args=args,
+                dimensions=dimensions,
+                eligible_count=eligible_count,
+                selected_count=len(rows),
+                completed_before_run=completed_before_run,
+                completed_count=len(completed),
+                success=success,
+                skipped=skipped,
+                failure=failure,
+                reasons=reasons,
+                usage_totals=usage_totals,
+            )
+            summary_path.write_text(
+                json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            continue
         if not missing_dimensions:
             skipped += len(dimensions)
             print(f"[{index}/{len(rows)}] skip {root_id}", flush=True)
@@ -391,6 +447,7 @@ def main() -> None:
 
         prompt = build_prompt(row, question, reference, missing_dimensions)
         last_error = ""
+        attempt_errors: list[str] = []
         for attempt in range(1, args.retries + 1):
             try:
                 candidates, usage, finish_reason = request_candidate(
@@ -435,6 +492,7 @@ def main() -> None:
                 break
             except Exception as exc:  # API errors must be logged and retried.
                 last_error = f"{type(exc).__name__}: {exc}"
+                attempt_errors.append(last_error)
                 print(
                     f"[{index}/{len(rows)}] attempt {attempt}/{args.retries} failed: "
                     f"{last_error}",
@@ -446,6 +504,9 @@ def main() -> None:
             failure += 1
             reason = last_error.split(":", 1)[0] if last_error else "unknown"
             reasons[reason] += 1
+            terminal = bool(attempt_errors) and all(
+                is_terminal_validation_error(error) for error in attempt_errors
+            )
             append_jsonl(
                 errors,
                 {
@@ -454,9 +515,12 @@ def main() -> None:
                     "question": question,
                     "dimensions": list(missing_dimensions),
                     "error": last_error,
+                    "terminal": terminal,
                     "generator_model": args.model,
                 },
             )
+            if terminal:
+                terminal_failures.add(root_id)
 
         summary = build_summary(
             args=args,
