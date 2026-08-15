@@ -13,6 +13,7 @@ MAX_SAMPLES="${MAX_SAMPLES:-12}"
 MIN_TRAINING_ROOTS="${MIN_TRAINING_ROOTS:-64}"
 CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-32}"
 CALIBRATION_ROOT_WINDOW="${CALIBRATION_ROOT_WINDOW:-8}"
+CALIBRATION_STOP_CHECK_INTERVAL="${CALIBRATION_STOP_CHECK_INTERVAL:-16}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
 MIN_FREE_MEMORY_PERCENT="${MIN_FREE_MEMORY_PERCENT:-90}"
 PREP_ROOT="${PREP_ROOT:-$PROJECT_ROOT/outputs/complete_subproblem_n${ROOT_LIMIT}_2h100}"
@@ -61,6 +62,7 @@ calibrate_shard() {
     --root-window "$CALIBRATION_ROOT_WINDOW" \
     --device cuda:0 --dtype bfloat16 --batch-size "$CALIBRATION_BATCH_SIZE" \
     --max-input-tokens 2048 --max-new-tokens 1024 \
+    --stop-check-interval "$CALIBRATION_STOP_CHECK_INTERVAL" \
     --temperature 1.0 --top-p 1.0 --stop-after-boxed
 }
 

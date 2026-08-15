@@ -521,6 +521,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--max-input-tokens", type=int, default=2048)
     parser.add_argument("--max-new-tokens", type=int, default=1024)
+    parser.add_argument(
+        "--stop-check-interval",
+        type=int,
+        default=16,
+        help="Check batched boxed-answer completion every N generated tokens.",
+    )
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)

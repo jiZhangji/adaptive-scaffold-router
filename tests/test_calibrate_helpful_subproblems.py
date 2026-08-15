@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from calibrate_helpful_subproblems import (
     RootCalibrationState,
@@ -11,6 +12,11 @@ from calibrate_helpful_subproblems import (
 
 
 class HelpfulSubproblemCalibrationTest(unittest.TestCase):
+    def test_boxed_stopping_uses_interval_batched_decode(self):
+        source = Path("metaask_probe.py").read_text(encoding="utf-8")
+        self.assertIn("stop_check_interval", source)
+        self.assertIn("tokenizer.batch_decode", source)
+
     def test_plan_is_short_and_rejects_answer_leak(self):
         candidate = {
             "source_step": "Use the Pythagorean theorem to determine the missing side before substitution",

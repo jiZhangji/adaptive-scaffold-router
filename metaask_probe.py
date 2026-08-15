@@ -152,16 +152,44 @@ class LocalGenerator:
                 kwargs.update(temperature=self.args.temperature, top_p=self.args.top_p)
             if stop_after_boxed:
                 tokenizer = self.tokenizer
+                check_interval = max(
+                    1,
+                    int(getattr(self.args, "stop_check_interval", 16)),
+                )
 
                 class BoxedAnswerStoppingCriteria(StoppingCriteria):
+                    def __init__(self) -> None:
+                        self.finished = torch.zeros(
+                            len(batch_prompts),
+                            device=inputs["input_ids"].device,
+                            dtype=torch.bool,
+                        )
+                        self.last_checked_length = 0
+
                     def __call__(self, input_ids, scores, **kwargs):
                         del scores, kwargs
-                        finished = []
-                        for sequence in input_ids:
-                            generated = sequence[prompt_length:]
-                            text = tokenizer.decode(generated, skip_special_tokens=True)
-                            finished.append(has_complete_boxed_answer(text))
-                        return torch.tensor(finished, device=input_ids.device, dtype=torch.bool)
+                        generated_length = input_ids.shape[1] - prompt_length
+                        if (
+                            generated_length - self.last_checked_length
+                            < check_interval
+                        ):
+                            return self.finished
+                        # One batched GPU-to-CPU synchronization every N tokens
+                        # replaces the previous per-sequence synchronization on
+                        # every token. Finished rows stay stopped between checks.
+                        generated = input_ids[:, prompt_length:].detach().cpu()
+                        texts = tokenizer.batch_decode(
+                            generated,
+                            skip_special_tokens=True,
+                        )
+                        newly_finished = torch.tensor(
+                            [has_complete_boxed_answer(text) for text in texts],
+                            device=input_ids.device,
+                            dtype=torch.bool,
+                        )
+                        self.finished |= newly_finished
+                        self.last_checked_length = generated_length
+                        return self.finished
 
                 kwargs["stopping_criteria"] = StoppingCriteriaList(
                     [BoxedAnswerStoppingCriteria()]
