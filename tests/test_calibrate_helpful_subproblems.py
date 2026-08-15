@@ -1,6 +1,13 @@
 import unittest
 
-from calibrate_helpful_subproblems import choose_candidate, minimal_plan
+from calibrate_helpful_subproblems import (
+    RootCalibrationState,
+    build_pending_jobs,
+    choose_candidate,
+    completed_sample_prefix,
+    expected_sample_keys,
+    minimal_plan,
+)
 
 
 class HelpfulSubproblemCalibrationTest(unittest.TestCase):
@@ -42,6 +49,34 @@ class HelpfulSubproblemCalibrationTest(unittest.TestCase):
             {"variant": "random_plan", "candidate_id": "c", "correct": 0, "sample_index": 0},
         ]
         self.assertIsNone(choose_candidate([candidate], records, 0.25, 1.0, 0.0, 4))
+
+    def test_resume_fills_partial_sample_holes_before_new_indices(self):
+        candidates = [
+            {"id": "c", "dimension": "planning", "minimal_plan": "factor first"}
+        ]
+        completed = set()
+        completed.update(expected_sample_keys("r", candidates, 0))
+        completed.add(("r", "", "no_help", 1))
+        self.assertEqual(completed_sample_prefix("r", candidates, completed, 12), 1)
+
+        state = RootCalibrationState("r", candidates, "Question", "4", [])
+        jobs, end_sample = build_pending_jobs(
+            state,
+            completed,
+            {("r", "c"): "try substitution"},
+            min_samples=4,
+            max_samples=12,
+            sample_batch=2,
+        )
+        self.assertEqual(end_sample, 4)
+        keys = {
+            (root, candidate, variant, sample)
+            for root, candidate, variant, sample, _ in jobs
+        }
+        self.assertNotIn(("r", "", "no_help", 1), keys)
+        self.assertIn(("r", "c", "relevant_plan", 1), keys)
+        self.assertIn(("r", "", "no_help", 2), keys)
+        self.assertNotIn(("r", "", "no_help", 4), keys)
 
 
 if __name__ == "__main__":
