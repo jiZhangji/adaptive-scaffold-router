@@ -11,6 +11,7 @@ ROOT_LIMIT="${ROOT_LIMIT:-256}"
 MIN_SAMPLES="${MIN_SAMPLES:-4}"
 MAX_SAMPLES="${MAX_SAMPLES:-12}"
 MIN_TRAINING_ROOTS="${MIN_TRAINING_ROOTS:-64}"
+CALIBRATION_BATCH_SIZE="${CALIBRATION_BATCH_SIZE:-16}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
 MIN_FREE_MEMORY_PERCENT="${MIN_FREE_MEMORY_PERCENT:-90}"
 PREP_ROOT="${PREP_ROOT:-$PROJECT_ROOT/outputs/complete_subproblem_n${ROOT_LIMIT}_2h100}"
@@ -55,7 +56,7 @@ calibrate_shard() {
     --root-limit "$ROOT_LIMIT" --num-shards 2 --shard-index "$shard" \
     --q-low 0.25 --q-high 0.60 --min-samples "$MIN_SAMPLES" \
     --max-samples "$MAX_SAMPLES" --sample-batch 2 --max-plan-words 12 \
-    --device cuda:0 --dtype bfloat16 --batch-size 8 \
+    --device cuda:0 --dtype bfloat16 --batch-size "$CALIBRATION_BATCH_SIZE" \
     --max-input-tokens 2048 --max-new-tokens 1024 \
     --temperature 1.0 --top-p 1.0 --stop-after-boxed
 }
