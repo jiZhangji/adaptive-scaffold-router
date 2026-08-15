@@ -158,6 +158,9 @@ def run(args: argparse.Namespace) -> None:
     roots = sorted(grouped)
     random.Random(args.seed).shuffle(roots)
     roots = roots[: args.root_limit] if args.root_limit > 0 else roots
+    if args.num_shards < 1 or not 0 <= args.shard_index < args.num_shards:
+        raise ValueError("sharding must satisfy num_shards >= 1 and 0 <= shard_index < num_shards")
+    roots = roots[args.shard_index :: args.num_shards]
     if len(roots) < 2:
         raise ValueError("At least two roots with non-leaking plans are required")
 
@@ -297,6 +300,8 @@ def run(args: argparse.Namespace) -> None:
         "max_plan_words": args.max_plan_words,
         "causal_filter": "relevant plan must beat no-help and dimension-matched random plan",
         "model": str(args.model),
+        "shard_index": args.shard_index,
+        "num_shards": args.num_shards,
     }
     (args.output_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
@@ -311,6 +316,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--root-limit", type=int, default=256)
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--num-shards", type=int, default=1)
     parser.add_argument("--q-low", type=float, default=0.25)
     parser.add_argument("--q-high", type=float, default=0.60)
     parser.add_argument("--min-gain", type=float, default=0.0)
