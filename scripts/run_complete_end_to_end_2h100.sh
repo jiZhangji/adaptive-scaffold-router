@@ -54,6 +54,7 @@ calibrate_shard() {
     "$PROJECT_ROOT/calibrate_helpful_subproblems.py" \
     --source-data "$SOURCE_DATA" --candidates "$CANDIDATES" --model "$MODEL_PATH" \
     --output-dir "$PREP_ROOT/calibration/shard_$shard" \
+    --root-manifest "$PREP_ROOT/calibration/shard_${shard}_roots.txt" \
     --root-limit "$ROOT_LIMIT" --num-shards 2 --shard-index "$shard" \
     --q-low 0.25 --q-high 0.60 --min-samples "$MIN_SAMPLES" \
     --max-samples "$MAX_SAMPLES" --sample-batch 2 --max-plan-words 12 \
@@ -62,6 +63,13 @@ calibrate_shard() {
     --max-input-tokens 2048 --max-new-tokens 1024 \
     --temperature 1.0 --top-p 1.0 --stop-after-boxed
 }
+
+conda run --no-capture-output -n "$ENV_NAME" python \
+  "$PROJECT_ROOT/prepare_calibration_root_manifests.py" \
+  --source-data "$SOURCE_DATA" --candidates "$CANDIDATES" \
+  --calibration-dir "$PREP_ROOT/calibration" \
+  --root-limit "$ROOT_LIMIT" --num-shards 2 --seed 42 --max-plan-words 12 \
+  2>&1 | tee "$PREP_ROOT/calibration/root_manifest.log"
 
 echo "Waiting for two free GPUs before calibration."
 wait_for_gpus

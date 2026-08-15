@@ -250,11 +250,26 @@ def run(args: argparse.Namespace) -> None:
                 {**candidate, "minimal_plan": plan}
             )
     roots = sorted(grouped)
-    random.Random(args.seed).shuffle(roots)
-    roots = roots[: args.root_limit] if args.root_limit > 0 else roots
-    if args.num_shards < 1 or not 0 <= args.shard_index < args.num_shards:
-        raise ValueError("sharding must satisfy num_shards >= 1 and 0 <= shard_index < num_shards")
-    roots = roots[args.shard_index :: args.num_shards]
+    if args.root_manifest is not None:
+        manifest_roots = [
+            line.strip()
+            for line in args.root_manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if len(manifest_roots) != len(set(manifest_roots)):
+            raise ValueError("root_manifest contains duplicate root IDs")
+        missing = set(manifest_roots) - set(roots)
+        if missing:
+            raise ValueError(f"root_manifest contains unavailable roots: {missing}")
+        roots = manifest_roots
+    else:
+        random.Random(args.seed).shuffle(roots)
+        roots = roots[: args.root_limit] if args.root_limit > 0 else roots
+        if args.num_shards < 1 or not 0 <= args.shard_index < args.num_shards:
+            raise ValueError(
+                "sharding must satisfy num_shards >= 1 and 0 <= shard_index < num_shards"
+            )
+        roots = roots[args.shard_index :: args.num_shards]
     if len(roots) < 2:
         raise ValueError("At least two roots with non-leaking plans are required")
 
@@ -484,6 +499,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidates", type=Path, required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--root-manifest", type=Path, default=None)
     parser.add_argument("--root-limit", type=int, default=256)
     parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--num-shards", type=int, default=1)
