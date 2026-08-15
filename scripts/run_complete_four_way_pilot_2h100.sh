@@ -21,20 +21,26 @@ AUTO_EVAL="${AUTO_EVAL:-1}"
 RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/c4${UID}_$$}"
 
 ROOT_DATA="$DATA_ROOT/root_train.parquet"
-MIXED_DATA="$DATA_ROOT/mixed_train.parquet"
+MIXED_SOURCE_DATA="$DATA_ROOT/mixed_train.parquet"
+MIXED_DATA="$RUN_ROOT/data/mixed_train_reward_compatible.parquet"
 PROPOSED_DATA="$DATA_ROOT/proposed_root_train.parquet"
 MANIFEST="$DATA_ROOT/curriculum.jsonl"
 
-mkdir -p "$RUN_ROOT/logs" "$RAY_TMP_BASE"/{v,s,p,f}
+mkdir -p "$RUN_ROOT/logs" "$RUN_ROOT/data" "$RAY_TMP_BASE"/{v,s,p,f}
 printf '%s\n' "$RUN_ROOT" > "$PROJECT_ROOT/outputs/latest_complete_four_way_pilot.txt"
 printf '%s\n' "complete_four_way_v1" > "$RUN_ROOT/protocol.txt"
 
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 WANDB_MODE=disabled
 export TOKENIZERS_PARALLELISM=false PYTHONHASHSEED=42 HYDRA_FULL_ERROR=1 VLLM_USE_V1=0
 
-for path in "$MODEL_PATH/config.json" "$ROOT_DATA" "$MIXED_DATA" "$PROPOSED_DATA" "$MANIFEST"; do
+for path in "$MODEL_PATH/config.json" "$ROOT_DATA" "$MIXED_SOURCE_DATA" "$PROPOSED_DATA" "$MANIFEST"; do
   [[ -s "$path" ]] || { echo "Missing asset: $path" >&2; exit 2; }
 done
+
+conda run --no-capture-output -n "$ENV_NAME" python \
+  "$PROJECT_ROOT/normalize_subproblem_reward_data.py" \
+  --input "$MIXED_SOURCE_DATA" --output "$MIXED_DATA" \
+  2>&1 | tee "$RUN_ROOT/logs/normalize_subproblem_data.log"
 
 if [[ "$REQUIRE_FREE_GPUS" == "1" ]]; then
   for gpu in 0 1; do
