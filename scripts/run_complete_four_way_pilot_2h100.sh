@@ -98,15 +98,29 @@ run_fade_is() {
   bash "$PROJECT_ROOT/scripts/run_fixed_budget_scaffold_arm_1gpu.sh"
 }
 
-echo "Starting Vanilla and official Scaf in parallel."
-run_vanilla > "$RUN_ROOT/logs/vanilla_train.log" 2>&1 & VPID=$!
-run_scaf > "$RUN_ROOT/logs/scaf_train.log" 2>&1 & SPID=$!
-wait "$VPID"; wait "$SPID"
+wait_for_wave() {
+  local label="$1"
+  shift
+  local status=0 pid
+  for pid in "$@"; do
+    wait "$pid" || status=1
+  done
+  if [[ "$status" -ne 0 ]]; then
+    echo "$label failed; inspect the corresponding logs in $RUN_ROOT/logs." >&2
+    return 1
+  fi
+  echo "$label completed."
+}
 
-echo "Starting Subproblem-mix and fading-IS in parallel."
+echo "Wave 1/2: starting official Scaf and Subproblem-mix in parallel."
 run_subproblem > "$RUN_ROOT/logs/subproblem_train.log" 2>&1 & SUBPID=$!
+run_scaf > "$RUN_ROOT/logs/scaf_train.log" 2>&1 & SPID=$!
+wait_for_wave "Wave 1 (Scaf + Subproblem)" "$SPID" "$SUBPID"
+
+echo "Wave 2/2: starting Vanilla and fading-IS in parallel."
+run_vanilla > "$RUN_ROOT/logs/vanilla_train.log" 2>&1 & VPID=$!
 run_fade_is > "$RUN_ROOT/logs/fade_is_train.log" 2>&1 & FPID=$!
-wait "$SUBPID"; wait "$FPID"
+wait_for_wave "Wave 2 (Vanilla + Fade-IS)" "$VPID" "$FPID"
 
 echo "All four training arms completed: $RUN_ROOT"
 if [[ "$AUTO_EVAL" == "1" ]]; then
