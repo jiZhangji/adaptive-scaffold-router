@@ -13,6 +13,7 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 SKIP_PREPARE="${SKIP_PREPARE:-0}"
 RUN_NAME="${RUN_NAME:-qwen_math_1_5b_${PAPER_REFERENCE}_$(date +%Y%m%d_%H%M%S)}"
 OUT="${OUT:-$PROJECT_ROOT/outputs/$RUN_NAME}"
+CHECKPOINT_RULE="${CHECKPOINT_RULE:-}"
 
 export CUDA_VISIBLE_DEVICES HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 export HYDRA_FULL_ERROR=1 TOKENIZERS_PARALLELISM=false WANDB_MODE=disabled
@@ -30,11 +31,11 @@ printf '%s\n' "$$" > "$OUT/pid.txt"
 # this file must not be mixed into the unified Base/Vanilla/Scaf/Subproblem
 # comparison table.
 "$PYTHON_BIN" - "$OUT/evaluation_protocol.json" "$MODEL_PATH" \
-  "$METHOD_LABEL" "$PAPER_REFERENCE" "$PROTOCOL_ID" <<'PY'
+  "$METHOD_LABEL" "$PAPER_REFERENCE" "$PROTOCOL_ID" "$CHECKPOINT_RULE" <<'PY'
 import json, os, sys
 from pathlib import Path
 
-output, model, method, reference, protocol_id = sys.argv[1:]
+output, model, method, reference, protocol_id, checkpoint_rule = sys.argv[1:]
 payload = {
     "protocol_id": protocol_id,
     "method": method,
@@ -51,7 +52,7 @@ payload = {
         "response_length": 2048,
     },
     "verification": "Scaf-GRPO verl.trainer.main_eval math-verify/symeval pipeline",
-    "checkpoint_rule": (
+    "checkpoint_rule": checkpoint_rule or (
         "base pretrained weights" if method == "base"
         else "best validation checkpoint, merged to Hugging Face format"
     ),

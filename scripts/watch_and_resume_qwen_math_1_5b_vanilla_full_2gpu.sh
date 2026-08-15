@@ -15,6 +15,7 @@ CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
 MAX_RESTARTS="${MAX_RESTARTS:-3}"
 ALLOW_FRESH_START="${ALLOW_FRESH_START:-0}"
+MIN_FREE_MEMORY_PERCENT="${MIN_FREE_MEMORY_PERCENT:-90}"
 RAY_TMPDIR="${RAY_TMPDIR:-/tmp/fr${UID}_$$}"
 
 export CUDA_VISIBLE_DEVICES RAY_TMPDIR RAY_ADDRESS=""
@@ -49,6 +50,38 @@ gpu_processes() {
       --format=csv,noheader,nounits 2>/dev/null | sed '/^[[:space:]]*$/d')"
   done
   printf '%s' "$output"
+}
+
+gpu_memory_report() {
+  local gpu free total report=""
+  IFS=',' read -ra gpu_ids <<< "$CUDA_VISIBLE_DEVICES"
+  for gpu in "${gpu_ids[@]}"; do
+    gpu="${gpu//[[:space:]]/}"
+    IFS=',' read -r free total < <(
+      nvidia-smi --id="$gpu" --query-gpu=memory.free,memory.total \
+        --format=csv,noheader,nounits 2>/dev/null | head -n 1
+    )
+    free="${free//[[:space:]]/}"
+    total="${total//[[:space:]]/}"
+    report+="GPU${gpu}:${free:-?}/${total:-?}MiB "
+  done
+  printf '%s' "$report"
+}
+
+gpus_have_enough_free_memory() {
+  local gpu free total
+  IFS=',' read -ra gpu_ids <<< "$CUDA_VISIBLE_DEVICES"
+  for gpu in "${gpu_ids[@]}"; do
+    gpu="${gpu//[[:space:]]/}"
+    IFS=',' read -r free total < <(
+      nvidia-smi --id="$gpu" --query-gpu=memory.free,memory.total \
+        --format=csv,noheader,nounits 2>/dev/null | head -n 1
+    )
+    free="${free//[[:space:]]/}"
+    total="${total//[[:space:]]/}"
+    [[ "$free" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || return 1
+    (( free * 100 >= total * MIN_FREE_MEMORY_PERCENT )) || return 1
+  done
 }
 
 run_resume() {
@@ -120,6 +153,15 @@ while true; do
     continue
   fi
 
+  memory_report="$(gpu_memory_report)"
+  if ! gpus_have_enough_free_memory; then
+    echo "[$(date '+%F %T')] insufficient free GPU memory ($memory_report); "\
+"waiting for at least ${MIN_FREE_MEMORY_PERCENT}% free on every GPU" \
+      | tee -a "$WATCH_LOG"
+    sleep "$POLL_SECONDS"
+    continue
+  fi
+
   if [[ -z "$checkpoint" && "$ALLOW_FRESH_START" != "1" ]]; then
     echo "No checkpoint found under $RUN_ROOT/checkpoints; refusing a fresh start." \
       | tee -a "$WATCH_LOG" >&2
@@ -127,7 +169,7 @@ while true; do
   fi
 
   restarts=$((restarts + 1))
-  echo "[$(date '+%F %T')] GPUs free; resume attempt $restarts/$MAX_RESTARTS from ${checkpoint:-fresh}" \
+  echo "[$(date '+%F %T')] GPUs ready ($memory_report); resume attempt $restarts/$MAX_RESTARTS from ${checkpoint:-fresh}" \
     | tee -a "$WATCH_LOG"
 
   set +e
