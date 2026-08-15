@@ -14,6 +14,8 @@ PPO_MINI_BATCH_SIZE="${PPO_MINI_BATCH_SIZE:-32}"
 MAX_RESPONSE_LENGTH="${MAX_RESPONSE_LENGTH:-2048}"
 SAVE_FREQ="${SAVE_FREQ:-25}"
 GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.45}"
+SCAFFOLD_GPU_MEMORY_UTILIZATION="${SCAFFOLD_GPU_MEMORY_UTILIZATION:-0.35}"
+SCAFFOLD_MICRO_BATCH_SIZE="${SCAFFOLD_MICRO_BATCH_SIZE:-2}"
 REQUIRE_FREE_GPUS="${REQUIRE_FREE_GPUS:-1}"
 AUTO_EVAL="${AUTO_EVAL:-1}"
 RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/c4${UID}_$$}"
@@ -66,7 +68,11 @@ run_scaf() {
   MODE=scaf TRAIN_STEPS="$TRAIN_STEPS" TRAIN_BATCH_SIZE="$TRAIN_BATCH_SIZE" \
   ROLLOUTS="$ROLLOUTS" PPO_MINI_BATCH_SIZE="$PPO_MINI_BATCH_SIZE" \
   MAX_RESPONSE_LENGTH="$MAX_RESPONSE_LENGTH" SAVE_FREQ="$SAVE_FREQ" \
-  GPU_MEMORY_UTILIZATION="$GPU_MEMORY_UTILIZATION" \
+  GPU_MEMORY_UTILIZATION="$SCAFFOLD_GPU_MEMORY_UTILIZATION" \
+  ACTOR_MICRO_BATCH_SIZE="$SCAFFOLD_MICRO_BATCH_SIZE" \
+  LOG_PROB_MICRO_BATCH_SIZE="$SCAFFOLD_MICRO_BATCH_SIZE" \
+  REF_LOG_PROB_MICRO_BATCH_SIZE="$SCAFFOLD_MICRO_BATCH_SIZE" \
+  FREE_CACHE_ENGINE=true RESUME_MODE=auto \
   SCAF_REPO="$SCAF_REPO" MODEL_PATH="$MODEL_PATH" TRAIN_DATA="$ROOT_DATA" \
   OUTPUT_DIR="$RUN_ROOT/scaf" \
   conda run --no-capture-output -n "$ENV_NAME" \
@@ -90,7 +96,11 @@ run_fade_is() {
   MODE=fade_is TRAIN_STEPS="$TRAIN_STEPS" TRAIN_BATCH_SIZE="$TRAIN_BATCH_SIZE" \
   ROLLOUTS="$ROLLOUTS" PPO_MINI_BATCH_SIZE="$PPO_MINI_BATCH_SIZE" \
   MAX_RESPONSE_LENGTH="$MAX_RESPONSE_LENGTH" SAVE_FREQ="$SAVE_FREQ" \
-  GPU_MEMORY_UTILIZATION="$GPU_MEMORY_UTILIZATION" CURRICULUM_MANIFEST="$MANIFEST" \
+  GPU_MEMORY_UTILIZATION="$SCAFFOLD_GPU_MEMORY_UTILIZATION" \
+  ACTOR_MICRO_BATCH_SIZE="$SCAFFOLD_MICRO_BATCH_SIZE" \
+  LOG_PROB_MICRO_BATCH_SIZE="$SCAFFOLD_MICRO_BATCH_SIZE" \
+  REF_LOG_PROB_MICRO_BATCH_SIZE="$SCAFFOLD_MICRO_BATCH_SIZE" \
+  FREE_CACHE_ENGINE=true RESUME_MODE=auto CURRICULUM_MANIFEST="$MANIFEST" \
   FADE_START=0 FADE_END="$TRAIN_STEPS" \
   SCAF_REPO="$SCAF_REPO" MODEL_PATH="$MODEL_PATH" TRAIN_DATA="$PROPOSED_DATA" \
   OUTPUT_DIR="$RUN_ROOT/fade_is" \
@@ -113,14 +123,36 @@ wait_for_wave() {
 }
 
 echo "Wave 1/2: starting official Scaf and Subproblem-mix in parallel."
-run_subproblem > "$RUN_ROOT/logs/subproblem_train.log" 2>&1 & SUBPID=$!
-run_scaf > "$RUN_ROOT/logs/scaf_train.log" 2>&1 & SPID=$!
-wait_for_wave "Wave 1 (Scaf + Subproblem)" "$SPID" "$SUBPID"
+WAVE_PIDS=()
+if [[ -d "$RUN_ROOT/subproblem/checkpoints/global_step_$TRAIN_STEPS/actor" ]]; then
+  echo "Subproblem already completed at global_step_$TRAIN_STEPS; skipping."
+else
+  run_subproblem > "$RUN_ROOT/logs/subproblem_train.log" 2>&1 &
+  WAVE_PIDS+=("$!")
+fi
+if [[ -d "$RUN_ROOT/scaf/checkpoints/global_step_$TRAIN_STEPS/actor" ]]; then
+  echo "Scaf already completed at global_step_$TRAIN_STEPS; skipping."
+else
+  run_scaf > "$RUN_ROOT/logs/scaf_train.log" 2>&1 &
+  WAVE_PIDS+=("$!")
+fi
+wait_for_wave "Wave 1 (Scaf + Subproblem)" "${WAVE_PIDS[@]}"
 
 echo "Wave 2/2: starting Vanilla and fading-IS in parallel."
-run_vanilla > "$RUN_ROOT/logs/vanilla_train.log" 2>&1 & VPID=$!
-run_fade_is > "$RUN_ROOT/logs/fade_is_train.log" 2>&1 & FPID=$!
-wait_for_wave "Wave 2 (Vanilla + Fade-IS)" "$VPID" "$FPID"
+WAVE_PIDS=()
+if [[ -d "$RUN_ROOT/vanilla/checkpoints/global_step_$TRAIN_STEPS/actor" ]]; then
+  echo "Vanilla already completed at global_step_$TRAIN_STEPS; skipping."
+else
+  run_vanilla > "$RUN_ROOT/logs/vanilla_train.log" 2>&1 &
+  WAVE_PIDS+=("$!")
+fi
+if [[ -d "$RUN_ROOT/fade_is/checkpoints/global_step_$TRAIN_STEPS/actor" ]]; then
+  echo "Fade-IS already completed at global_step_$TRAIN_STEPS; skipping."
+else
+  run_fade_is > "$RUN_ROOT/logs/fade_is_train.log" 2>&1 &
+  WAVE_PIDS+=("$!")
+fi
+wait_for_wave "Wave 2 (Vanilla + Fade-IS)" "${WAVE_PIDS[@]}"
 
 echo "All four training arms completed: $RUN_ROOT"
 if [[ "$AUTO_EVAL" == "1" ]]; then
