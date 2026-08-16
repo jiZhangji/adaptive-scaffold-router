@@ -25,6 +25,8 @@ class RayPPOTrainer:
     def fit(self):
         assert len(new_gen_batch.non_tensor_batch['uid']) == solve_none_first
         new_gen_batch = build_new_message(new_gen_batch, self.tokenizer)
+        new_gen_batch_output = unpad_dataproto(new_gen_batch_output_padded, pad_size=pad_size)
+        new_gen_batch_output.non_tensor_batch["responses_text"] = []
         reward_tensor_debug, reward_extra_infos_dict_debug = compute_reward(batch, self.reward_fn)
         assert torch.equal(reward_tensor_first, reward_tensor_debug), "Reward tensors do not match after debug"
         if new_data_map:
@@ -44,6 +46,10 @@ class CompleteScafInstallerTest(unittest.TestCase):
         self.assertIn("apply_sequence_weights", patched)
         self.assertIn("if self.curriculum_enabled:", patched)
         self.assertIn("self.curriculum_off_context = bool", patched)
+        self.assertIn("hinted_log_prob = self.actor_rollout_wg.compute_log_prob", patched)
+        self.assertIn('hinted_log_prob.batch["old_log_probs"]', patched)
+        self.assertIn('if "rollout_log_probs" not in batch.batch', patched)
+        self.assertIn("behavior_log_probs = torch.where", patched)
         self.assertIn("curriculum_off_context_mask", patched)
         self.assertIn('"curriculum/is_weight_mean"', patched)
         self.assertEqual(patch_trainer_source(patched), patched)

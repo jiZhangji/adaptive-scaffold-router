@@ -101,6 +101,39 @@ def replace_build_new_message(lines: list[str]) -> None:
     lines[start : end + 1] = block
 
 
+def insert_hinted_behavior_log_probs(lines: list[str]) -> None:
+    marker = 'new_gen_batch_output.batch["rollout_log_probs"] = ('
+    if any(marker in line for line in lines):
+        return
+    unpad_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "new_gen_batch_output = unpad_dataproto(" in line
+        ),
+        None,
+    )
+    if unpad_index is None:
+        raise ValueError("Hinted generation unpad call was not found")
+    indent = lines[unpad_index][
+        : len(lines[unpad_index]) - len(lines[unpad_index].lstrip())
+    ]
+    block = [
+        f"{indent}if self.curriculum_off_context:",
+        f"{indent}    hinted_log_prob = self.actor_rollout_wg.compute_log_prob(",
+        f"{indent}        new_gen_batch_output",
+        f"{indent}    )",
+        f'{indent}    if "old_log_probs" not in hinted_log_prob.batch:',
+        f"{indent}        raise ValueError(",
+        f'{indent}            "Actor log-prob output is missing old_log_probs"',
+        f"{indent}        )",
+        f'{indent}    new_gen_batch_output.batch["rollout_log_probs"] = (',
+        f'{indent}        hinted_log_prob.batch["old_log_probs"]',
+        f"{indent}    )",
+    ]
+    lines[unpad_index + 1 : unpad_index + 1] = block
+
+
 def insert_off_context_replacement(lines: list[str]) -> None:
     marker = 'batch.batch["curriculum_off_context_mask"][orig_idx] = True'
     if any(marker in line for line in lines):
@@ -128,8 +161,15 @@ def insert_off_context_replacement(lines: list[str]) -> None:
         f"{indent}        raise ValueError(",
         f'{indent}            "Off-context correction requires rollout_log_probs from hinted generation"',
         f"{indent}        )",
+        f'{indent}    if "rollout_log_probs" not in batch.batch:',
+        f'{indent}        batch.batch["rollout_log_probs"] = torch.zeros_like(',
+        f'{indent}            batch.batch["responses"],',
+        f'{indent}            dtype=new_gen_batch_output.batch["rollout_log_probs"].dtype,',
+        f"{indent}        )",
         f'{indent}    batch.batch["rollout_log_probs"][orig_idx] = (',
-        f'{indent}        new_gen_batch_output.batch["rollout_log_probs"][new_idx]',
+        f'{indent}        new_gen_batch_output.batch["rollout_log_probs"][new_idx].to(',
+        f'{indent}            batch.batch["responses"].device',
+        f"{indent}        )",
         f"{indent}    )",
         f'{indent}    batch.batch["curriculum_off_context_mask"][orig_idx] = True',
     ]
@@ -166,9 +206,14 @@ def insert_importance_correction(lines: list[str]) -> None:
         f'{indent}    and batch.batch["curriculum_off_context_mask"].any()',
         f"{indent}):",
         f'{indent}    active = batch.batch["curriculum_off_context_mask"].bool()',
+        f"{indent}    behavior_log_probs = torch.where(",
+        f"{indent}        active.unsqueeze(-1),",
+        f'{indent}        batch.batch["rollout_log_probs"],',
+        f'{indent}        batch.batch["old_log_probs"],',
+        f"{indent}    )",
         f"{indent}    is_weights = sequence_importance_weights(",
         f'{indent}        target_log_probs=batch.batch["old_log_probs"],',
-        f'{indent}        behavior_log_probs=batch.batch["rollout_log_probs"],',
+        f"{indent}        behavior_log_probs=behavior_log_probs,",
         f'{indent}        response_mask=batch.batch["response_mask"],',
         f"{indent}        clip_low=self.curriculum_is_clip_low,",
         f"{indent}        clip_high=self.curriculum_is_clip_high,",
@@ -237,6 +282,7 @@ def patch_trainer_source(source: str) -> str:
         )
 
     replace_build_new_message(lines)
+    insert_hinted_behavior_log_probs(lines)
 
     if not any('batch.batch["curriculum_off_context_mask"] = torch.zeros' in line for line in lines):
         insert_after(
