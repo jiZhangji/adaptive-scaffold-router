@@ -1,6 +1,11 @@
 import unittest
 
-from scaf_integration.curriculum_runtime import _as_parts, _build_prompt, load_optional_manifest
+from scaf_integration.curriculum_runtime import (
+    _as_parts,
+    _build_prompt,
+    guided_rollout_count,
+    load_optional_manifest,
+)
 
 
 class FakeTokenizer:
@@ -27,6 +32,11 @@ class CurriculumRuntimeTests(unittest.TestCase):
         tokenizer = FakeTokenizer()
         prompt = _build_prompt(tokenizer, "2+2?", "planning", ("add", "verify"))
         self.assertIn("Planning Hints: add verify", prompt)
+
+    def test_fading_fraction_controls_scaffold_dropout(self):
+        self.assertEqual(guided_rollout_count(8, 1.0), 8)
+        self.assertEqual(guided_rollout_count(8, 0.5), 4)
+        self.assertEqual(guided_rollout_count(8, 0.0), 0)
 
 
 if __name__ == "__main__":

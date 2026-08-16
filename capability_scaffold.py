@@ -337,6 +337,15 @@ def fade_scaffold(parts: Sequence[str], visible_fraction: float) -> tuple[str, .
     clean_parts = tuple(str(part).strip() for part in parts if str(part).strip())
     if not clean_parts or visible_fraction == 0.0:
         return ()
+    # Student-aware plans are often stored as one short string rather than a
+    # list of independently removable hints.  Fading only at the list level
+    # would keep the entire plan visible until the final step.  In that common
+    # case, progressively shorten the plan itself so the train/test transition
+    # is real rather than a one-step cliff.
+    if len(clean_parts) == 1 and visible_fraction < 1.0:
+        tokens = clean_parts[0].split()
+        visible_tokens = max(1, math.ceil(len(tokens) * visible_fraction))
+        return (" ".join(tokens[:visible_tokens]),)
     visible_count = max(1, math.ceil(len(clean_parts) * visible_fraction))
     return clean_parts[:visible_count]
 

@@ -85,6 +85,10 @@ class CapabilityScaffoldTests(unittest.TestCase):
     def test_fades_scaffold_and_computes_clipped_weight(self):
         self.assertEqual(visible_scaffold_fraction(5, 0, 10), 0.5)
         self.assertEqual(fade_scaffold(["a", "b", "c", "d"], 0.5), ("a", "b"))
+        self.assertEqual(
+            fade_scaffold(["derive the symmetric term before simplifying"], 0.5),
+            ("derive the symmetric",),
+        )
         weight = clipped_importance_weight(
             target_token_logprobs=[-1.0, -1.0],
             behavior_token_logprobs=[-2.0, -2.0],

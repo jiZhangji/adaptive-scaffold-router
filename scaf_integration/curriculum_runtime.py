@@ -7,6 +7,7 @@ original Scaf-GRPO behavior remains the default.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -38,6 +39,20 @@ def load_optional_manifest(path: str | None) -> dict[str, dict[str, Any]] | None
     if path is None or not str(path).strip():
         return None
     return load_curriculum_manifest(path)
+
+
+def guided_rollout_count(rollouts: int, visible_fraction: float) -> int:
+    """Convert the fading schedule into deterministic scaffold dropout.
+
+    A fraction of each failed root's regenerated rollouts keeps the minimal
+    scaffold; the rest are generated from the naked root prompt.  This keeps
+    the target test distribution present throughout root-aligned training.
+    """
+    if rollouts < 1:
+        raise ValueError("rollouts must be positive")
+    if not 0.0 <= visible_fraction <= 1.0:
+        raise ValueError("visible_fraction must be in [0, 1]")
+    return min(rollouts, max(0, int(math.floor(rollouts * visible_fraction + 0.5))))
 
 
 def _as_parts(value: Any) -> list[str]:
@@ -139,32 +154,60 @@ def build_curriculum_new_message(
         )
         kind = request.get("scaffold_kind")
         hints = tuple(request.get("hint_parts") or ())
-        raw_prompt = _build_prompt(tokenizer, question, kind, hints)
-        model_inputs = tokenizer(raw_prompt, return_tensors="pt", add_special_tokens=False)
-        input_ids, attention_mask = verl_F.postprocess_data(
-            input_ids=model_inputs["input_ids"],
-            attention_mask=model_inputs["attention_mask"],
-            max_length=max_length,
-            pad_token_id=tokenizer.pad_token_id,
-            left_pad=True,
-            truncation=truncation,
+        visible_fraction = float(request.get("visible_fraction", 0.0))
+        guided_count = (
+            guided_rollout_count(rollouts, visible_fraction)
+            if kind and hints
+            else 0
         )
-        position_ids = torch.clip(torch.cumsum(attention_mask, dim=-1) - 1, min=0)
-        hint_level = _HINT_LEVELS.get(str(kind), 0)
+        encoded: dict[bool, tuple[str, torch.Tensor, torch.Tensor, torch.Tensor]] = {}
 
-        for _ in range(rollouts):
-            all_input_ids.append(input_ids[0])
-            all_attention_masks.append(attention_mask[0])
-            all_position_ids.append(position_ids[0])
+        for rollout_index in range(rollouts):
+            use_scaffold = rollout_index < guided_count
+            if use_scaffold not in encoded:
+                rollout_kind = kind if use_scaffold else None
+                rollout_hints = hints if use_scaffold else ()
+                raw_prompt = _build_prompt(tokenizer, question, rollout_kind, rollout_hints)
+                model_inputs = tokenizer(
+                    raw_prompt, return_tensors="pt", add_special_tokens=False
+                )
+                input_ids, attention_mask = verl_F.postprocess_data(
+                    input_ids=model_inputs["input_ids"],
+                    attention_mask=model_inputs["attention_mask"],
+                    max_length=max_length,
+                    pad_token_id=tokenizer.pad_token_id,
+                    left_pad=True,
+                    truncation=truncation,
+                )
+                position_ids = torch.clip(
+                    torch.cumsum(attention_mask, dim=-1) - 1, min=0
+                )
+                encoded[use_scaffold] = (
+                    raw_prompt,
+                    input_ids[0],
+                    attention_mask[0],
+                    position_ids[0],
+                )
+            raw_prompt, input_ids, attention_mask, position_ids = encoded[use_scaffold]
+            hint_level = _HINT_LEVELS.get(str(kind), 0) if use_scaffold else 0
+            all_input_ids.append(input_ids)
+            all_attention_masks.append(attention_mask)
+            all_position_ids.append(position_ids)
             non_tensors["uid"].append(original_uids[index])
             non_tensors["hint_level"].append(hint_level)
             non_tensors["raw_prompt"].append(raw_prompt)
             non_tensors["reward_model"].append(reward_models[index])
             non_tensors["data_source"].append(data_sources[index])
-            non_tensors["curriculum_phase"].append(request["phase"])
-            non_tensors["scaffold_name"].append(request.get("scaffold_name"))
+            non_tensors["curriculum_phase"].append(
+                request["phase"] if use_scaffold else "unguided_dropout"
+            )
+            non_tensors["scaffold_name"].append(
+                request.get("scaffold_name") if use_scaffold else None
+            )
             non_tensors["question_key"].append(question_key)
-            non_tensors["visible_fraction"].append(float(request.get("visible_fraction", 0.0)))
+            non_tensors["visible_fraction"].append(
+                visible_fraction if use_scaffold else 0.0
+            )
 
     if not all_input_ids:
         raise ValueError("No failed root questions were available for curriculum regeneration")

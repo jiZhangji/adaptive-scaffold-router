@@ -105,7 +105,16 @@ for dataset in "${ORDER[@]}"; do
 done
 
 cd "$PROJECT_ROOT"
-"$PYTHON_BIN" scripts/summarize_paper_eval.py --run-root "$OUT" \
-  --model-size 1.5b --paper-reference "$PAPER_REFERENCE" --method-label "$METHOD_LABEL" \
-  | tee "$OUT/logs/summary.log"
+# Older offline servers may have a summarize_paper_eval.py without the
+# optional --method-label flag. Metrics are already complete at this point,
+# so fall back to the compatible invocation instead of failing evaluation.
+if "$PYTHON_BIN" scripts/summarize_paper_eval.py --help 2>&1 | grep -q -- "--method-label"; then
+  "$PYTHON_BIN" scripts/summarize_paper_eval.py --run-root "$OUT" \
+    --model-size 1.5b --paper-reference "$PAPER_REFERENCE" --method-label "$METHOD_LABEL" \
+    | tee "$OUT/logs/summary.log"
+else
+  "$PYTHON_BIN" scripts/summarize_paper_eval.py --run-root "$OUT" \
+    --model-size 1.5b --paper-reference "$PAPER_REFERENCE" \
+    | tee "$OUT/logs/summary.log"
+fi
 echo "Evaluation complete: $OUT/paper_comparison.md"
