@@ -264,6 +264,35 @@ def insert_importance_correction(lines: list[str]) -> None:
     lines[end + 1 : end + 1] = block
 
 
+def repair_hint_level_assertion(lines: list[str]) -> None:
+    marker = "counted_hint_solutions = ("
+    if any(marker in line for line in lines):
+        return
+    assertion_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if "assert solved_by_hint_level[1]"
+            in line
+            and "solve_with_hint" in line
+        ),
+        None,
+    )
+    if assertion_index is None:
+        return
+    indent = lines[assertion_index][
+        : len(lines[assertion_index]) - len(lines[assertion_index].lstrip())
+    ]
+    lines[assertion_index : assertion_index + 1] = [
+        f"{indent}counted_hint_solutions = (",
+        f"{indent}    sum(solved_by_hint_level.values())",
+        f'{indent}    if hasattr(solved_by_hint_level, "values")',
+        f"{indent}    else sum(solved_by_hint_level)",
+        f"{indent})",
+        f"{indent}assert counted_hint_solutions == solve_with_hint",
+    ]
+
+
 def patch_trainer_source(source: str) -> str:
     lines = source.splitlines()
     ensure_runtime_imports(lines)
@@ -322,6 +351,7 @@ def patch_trainer_source(source: str) -> str:
         )
 
     insert_off_context_replacement(lines)
+    repair_hint_level_assertion(lines)
     insert_importance_correction(lines)
     text = "\n".join(lines) + "\n"
     text = text.replace(

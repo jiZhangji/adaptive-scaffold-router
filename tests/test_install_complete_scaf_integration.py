@@ -48,6 +48,10 @@ LEGACY_OFF_CONTEXT_PATCHED = PARTIALLY_PATCHED.replace(
                         new_gen_batch_output.batch["rollout_log_probs"][new_idx]
                     )
                     batch.batch["curriculum_off_context_mask"][orig_idx] = True''',
+).replace(
+    "        batch = compute_advantage(",
+    "        assert solved_by_hint_level[1] + solved_by_hint_level[2] + solved_by_hint_level[3] == solve_with_hint\n"
+    "        batch = compute_advantage(",
 )
 
 
@@ -73,6 +77,12 @@ class CompleteScafInstallerTest(unittest.TestCase):
             patched,
         )
         self.assertEqual(patched.count('batch.batch["curriculum_off_context_mask"][orig_idx] = True'), 1)
+        self.assertIn("counted_hint_solutions = (", patched)
+        self.assertIn("sum(solved_by_hint_level.values())", patched)
+        self.assertNotIn(
+            "assert solved_by_hint_level[1] + solved_by_hint_level[2] + solved_by_hint_level[3]",
+            patched,
+        )
         self.assertEqual(patch_trainer_source(patched), patched)
 
 
