@@ -135,8 +135,32 @@ def insert_hinted_behavior_log_probs(lines: list[str]) -> None:
 
 
 def insert_off_context_replacement(lines: list[str]) -> None:
-    marker = 'batch.batch["curriculum_off_context_mask"][orig_idx] = True'
-    if any(marker in line for line in lines):
+    complete_marker = 'if "rollout_log_probs" not in batch.batch:'
+    if any(complete_marker in line for line in lines):
+        return
+    legacy_assignment = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if 'batch.batch["rollout_log_probs"][orig_idx] = (' in line
+        ),
+        None,
+    )
+    if legacy_assignment is not None:
+        # Older versions of the integration copied hinted behavior log probs
+        # into a batch field that had never been allocated.  Upgrade that
+        # partial patch in place instead of treating the mask assignment as a
+        # signal that the complete integration is already installed.
+        indent = lines[legacy_assignment][
+            : len(lines[legacy_assignment]) - len(lines[legacy_assignment].lstrip())
+        ]
+        lines[legacy_assignment:legacy_assignment] = [
+            f'{indent}if "rollout_log_probs" not in batch.batch:',
+            f'{indent}    batch.batch["rollout_log_probs"] = torch.zeros_like(',
+            f'{indent}        batch.batch["responses"],',
+            f'{indent}        dtype=new_gen_batch_output.batch["rollout_log_probs"].dtype,',
+            f"{indent}    )",
+        ]
         return
     replace_start = next(
         (index for index, line in enumerate(lines) if "if self.replace_num == 1:" in line),

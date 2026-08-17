@@ -40,6 +40,17 @@ class RayPPOTrainer:
 '''
 
 
+LEGACY_OFF_CONTEXT_PATCHED = PARTIALLY_PATCHED.replace(
+    'batch.batch["position_ids"][orig_idx] = compute_position_id_with_mask(batch.batch["attention_mask"][orig_idx])',
+    '''batch.batch["position_ids"][orig_idx] = compute_position_id_with_mask(batch.batch["attention_mask"][orig_idx])
+                if self.curriculum_off_context:
+                    batch.batch["rollout_log_probs"][orig_idx] = (
+                        new_gen_batch_output.batch["rollout_log_probs"][new_idx]
+                    )
+                    batch.batch["curriculum_off_context_mask"][orig_idx] = True''',
+)
+
+
 class CompleteScafInstallerTest(unittest.TestCase):
     def test_repairs_partial_patch_and_is_idempotent(self):
         patched = patch_trainer_source(PARTIALLY_PATCHED)
@@ -52,6 +63,16 @@ class CompleteScafInstallerTest(unittest.TestCase):
         self.assertIn("behavior_log_probs = torch.where", patched)
         self.assertIn("curriculum_off_context_mask", patched)
         self.assertIn('"curriculum/is_weight_mean"', patched)
+        self.assertEqual(patch_trainer_source(patched), patched)
+
+    def test_upgrades_legacy_off_context_replacement(self):
+        patched = patch_trainer_source(LEGACY_OFF_CONTEXT_PATCHED)
+        self.assertIn('if "rollout_log_probs" not in batch.batch:', patched)
+        self.assertIn(
+            'batch.batch["rollout_log_probs"] = torch.zeros_like(',
+            patched,
+        )
+        self.assertEqual(patched.count('batch.batch["curriculum_off_context_mask"][orig_idx] = True'), 1)
         self.assertEqual(patch_trainer_source(patched), patched)
 
 
