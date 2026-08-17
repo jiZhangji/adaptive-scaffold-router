@@ -9,6 +9,9 @@ METHOD_LABEL="${METHOD_LABEL:-$PAPER_REFERENCE}"
 PROTOCOL_ID="scaf-grpo-greedy-pass1-v1"
 CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0,1}"
 N_GPUS="${N_GPUS:-2}"
+EVAL_BATCH_SIZE="${EVAL_BATCH_SIZE:-256}"
+EVAL_GPU_MEMORY_UTILIZATION="${EVAL_GPU_MEMORY_UTILIZATION:-0.45}"
+EVAL_MAX_NUM_BATCHED_TOKENS="${EVAL_MAX_NUM_BATCHED_TOKENS:-16384}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 SKIP_PREPARE="${SKIP_PREPARE:-0}"
 RUN_NAME="${RUN_NAME:-qwen_math_1_5b_${PAPER_REFERENCE}_$(date +%Y%m%d_%H%M%S)}"
@@ -89,13 +92,15 @@ for dataset in "${ORDER[@]}"; do
   echo "[$dataset] generating unified greedy pass@1 on $N_GPUS GPUs"
   "$PYTHON_BIN" -m verl.trainer.main_generation \
     trainer.nnodes=1 trainer.n_gpus_per_node="$N_GPUS" \
-    data.path="$data_path" data.batch_size=1024 data.prompt_key=prompt \
+    data.path="$data_path" data.batch_size="$EVAL_BATCH_SIZE" data.prompt_key=prompt \
     data.n_samples=1 data.output_path="$save_path" \
     model.path="$MODEL_PATH" +model.trust_remote_code=True \
     rollout.do_sample=False rollout.temperature=0.0 rollout.top_p=1.0 rollout.top_k=-1 \
     rollout.prompt_length=2048 rollout.response_length=2048 \
-    rollout.tensor_model_parallel_size=1 rollout.gpu_memory_utilization=0.72 \
-    rollout.max_num_batched_tokens=32768 rollout.log_prob_micro_batch_size_per_gpu=1 \
+    rollout.tensor_model_parallel_size=1 \
+    rollout.gpu_memory_utilization="$EVAL_GPU_MEMORY_UTILIZATION" \
+    rollout.max_num_batched_tokens="$EVAL_MAX_NUM_BATCHED_TOKENS" \
+    rollout.log_prob_micro_batch_size_per_gpu=1 \
     2>&1 | tee "$OUT/logs/${dataset}_generation.log"
 
   "$PYTHON_BIN" -m verl.trainer.main_eval \
