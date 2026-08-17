@@ -264,7 +264,26 @@ def insert_importance_correction(lines: list[str]) -> None:
     lines[end + 1 : end + 1] = block
 
 
-def repair_hint_level_assertion(lines: list[str]) -> None:
+def repair_hint_level_statistics(lines: list[str]) -> None:
+    for index, line in enumerate(lines):
+        if line.strip() == "solve_with_hint = solve_any_second":
+            indent = line[: len(line) - len(line.lstrip())]
+            lines[index : index + 1] = [
+                f"{indent}solve_with_hint = sum(solved_by_hint_level.values())",
+                f"{indent}dynamic_unguided_solutions = max(",
+                f"{indent}    0, solve_any_second - solve_with_hint",
+                f"{indent})",
+            ]
+            break
+    for index, line in enumerate(lines):
+        if line.strip() == "solve_without_hint = solve_any_first":
+            indent = line[: len(line) - len(line.lstrip())]
+            lines[index] = (
+                f"{indent}solve_without_hint = "
+                "solve_any_first + dynamic_unguided_solutions"
+            )
+            break
+
     marker = "counted_hint_solutions = ("
     if any(marker in line for line in lines):
         return
@@ -351,7 +370,7 @@ def patch_trainer_source(source: str) -> str:
         )
 
     insert_off_context_replacement(lines)
-    repair_hint_level_assertion(lines)
+    repair_hint_level_statistics(lines)
     insert_importance_correction(lines)
     text = "\n".join(lines) + "\n"
     text = text.replace(
