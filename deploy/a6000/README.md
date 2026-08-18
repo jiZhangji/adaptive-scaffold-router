@@ -33,8 +33,10 @@ cd adaptive-scaffold-router
 bash deploy/a6000/one_click_a6000.sh
 ```
 
-The script asks for the ModelScope token without echoing it. The token is not
-written into this repository.
+The script asks for the ModelScope token immediately, before any large model
+or dataset download. The token is not written into this repository. The
+training parquet is downloaded after the ModelScope artifacts and uses the
+`hf-mirror.com` endpoint by default.
 
 ## Setup and immediately evaluate Step 10/35/50
 

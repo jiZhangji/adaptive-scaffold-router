@@ -75,11 +75,17 @@ PATH="$ENV_PREFIX/bin:$PATH" SCAF_REPO="$SCAF_REPO" \
 
 echo
 echo "===== OFFICIAL TRAINING PARQUET ====="
-(
-  cd "$PROJECT_ROOT"
-  DATA_DIR="$PROJECT_ROOT/data/DeepScaleR" \
-    bash scripts/download_scaf_data.sh
-)
+if [[ "${SKIP_TRAINING_DATA:-0}" == "1" ]]; then
+  echo "Training parquet download deferred until after ModelScope artifacts."
+else
+  (
+    cd "$PROJECT_ROOT"
+    DATA_DIR="$PROJECT_ROOT/data/DeepScaleR" \
+      BASE_URL="${BASE_URL:-https://huggingface.co/datasets/hkuzxc/scaf-grpo-dataset/resolve/main}" \
+      MIRROR_BASE_URL="${MIRROR_BASE_URL:-https://hf-mirror.com/datasets/hkuzxc/scaf-grpo-dataset/resolve/main}" \
+      bash scripts/download_scaf_data.sh
+  )
+fi
 
 cat > "$INSTALL_ROOT/a6000_paths.env" <<EOF
 export INSTALL_ROOT="$INSTALL_ROOT"
