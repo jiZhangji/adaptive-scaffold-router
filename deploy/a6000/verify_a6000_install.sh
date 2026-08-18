@@ -47,8 +47,10 @@ echo "===== REQUIRED FILES ====="
 check_file "$PROJECT_ROOT/data/DeepScaleR/Qwen2.5-Math-1.5B.parquet"
 check_file "$PROJECT_ROOT/models/Qwen2.5-Math-1.5B/config.json"
 check_file "$RUN_ROOT/student_aware_merged/config.json"
-check_file "$SCAF_REPO/data/AIME24/math-verify/system-p1/test.parquet"
-check_file "$SCAF_REPO/data/AMC23/math-verify/system-p1/test.parquet"
+for dataset in \
+  AIME24 AIME25 AMC23 MinervaMath MATH-500 OlympiadBench GaoKao2023en; do
+  check_file "$SCAF_REPO/data/$dataset/math-verify/system-p1/test.parquet"
+done
 
 echo
 echo "===== CHECKPOINTS ====="
