@@ -14,6 +14,8 @@ SOURCE_DATA="${SOURCE_DATA:-$PROJECT_ROOT/data/DeepScaleR/Qwen2.5-Math-1.5B.parq
 PREP_ROOT="${PREP_ROOT:-$PROJECT_ROOT/outputs/complete_subproblem_n768_2h100}"
 ANCHORS="${ANCHORS:-$PREP_ROOT/calibration/training_candidates.jsonl}"
 BASELINE_RUN_ROOT="${BASELINE_RUN_ROOT:-$PROJECT_ROOT/outputs/complete_four_way_ordered_20260815_155120}"
+STUDENT_AWARE_RUN="${STUDENT_AWARE_RUN:-$PROJECT_ROOT/outputs/student_aware_root_aligned_20260816_183357}"
+LEARNABILITY_SOURCE="${LEARNABILITY_SOURCE:-$STUDENT_AWARE_RUN/learnability/subproblem_learnability.jsonl}"
 RUN_ROOT="${RUN_ROOT:-$PROJECT_ROOT/outputs/transfer_aware_pilot_$(date +%Y%m%d_%H%M%S)}"
 PROBE_ROOTS="${PROBE_ROOTS:-16}"
 ROOT_SAMPLES="${ROOT_SAMPLES:-4}"
@@ -59,6 +61,10 @@ conda run --no-capture-output -n "$ENV_NAME" python \
   2>&1 | tee "$RUN_ROOT/logs/selection.log"
 
 echo "Stages 1-3: run the matched Student-Aware training protocol with new selection."
+if [[ -s "$LEARNABILITY_SOURCE" ]]; then
+  mkdir -p "$RUN_ROOT/learnability"
+  cp "$LEARNABILITY_SOURCE" "$RUN_ROOT/learnability/subproblem_learnability.jsonl"
+fi
 SELECTED_CANDIDATES="$SELECTED" RUN_ROOT="$RUN_ROOT" \
 BASELINE_RUN_ROOT="$BASELINE_RUN_ROOT" TRAIN_GPU="$TRAIN_GPU" \
 RUN_SUBPROBLEM_PROBE=0 AUTO_EVAL="$AUTO_EVAL" EVAL_GPUS="$TRAIN_GPU" EVAL_N_GPUS=1 \
