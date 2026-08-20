@@ -5,6 +5,7 @@ set -euo pipefail
 # checkpoints and evaluations are reused for the final comparison.
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONDA_SH="${CONDA_SH:-/opt/miniconda3/etc/profile.d/conda.sh}"
 SCAF_REPO="${SCAF_REPO:-$(dirname "$PROJECT_ROOT")/Scaf-GRPO}"
 ENV_NAME="${ENV_NAME:-scaf-grpo}"
 MODEL_PATH="${MODEL_PATH:-$PROJECT_ROOT/models/Qwen2.5-Math-1.5B}"
@@ -34,6 +35,9 @@ ROOT_ONLY_ACTOR_MICRO_BATCH_SIZE="${ROOT_ONLY_ACTOR_MICRO_BATCH_SIZE:-2}"
 ROOT_ONLY_LOG_PROB_MICRO_BATCH_SIZE="${ROOT_ONLY_LOG_PROB_MICRO_BATCH_SIZE:-2}"
 ROOT_ONLY_REF_LOG_PROB_MICRO_BATCH_SIZE="${ROOT_ONLY_REF_LOG_PROB_MICRO_BATCH_SIZE:-2}"
 RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/sar${UID}_$$}"
+
+[[ -s "$CONDA_SH" ]] || { echo "Conda initialization script is missing: $CONDA_SH" >&2; exit 2; }
+source "$CONDA_SH"
 
 if (( PRECONDITION_STEPS < 0 || ROOT_ALIGNED_END_STEP <= PRECONDITION_STEPS || TOTAL_STEPS <= ROOT_ALIGNED_END_STEP )); then
   echo "Require 0 <= PRECONDITION_STEPS < ROOT_ALIGNED_END_STEP < TOTAL_STEPS" >&2
