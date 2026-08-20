@@ -56,6 +56,19 @@ def run(args: argparse.Namespace) -> None:
             # Stage 1.  Its copied anchor q_help described another candidate
             # and must not be reused as a scaffold-usability measurement.
             chosen["success_probability"] = 0.0
+            # No-help is a root-level control and remains valid after changing
+            # the selected subproblem.  The matched-random score is retained
+            # only as provenance/diagnostics; it does not gate Stage 1 because
+            # success_probability is explicitly reset above.
+            chosen["no_help_probability"] = float(
+                anchor.get("no_help_probability", 0.0)
+            )
+            chosen["random_plan_probability"] = float(
+                anchor.get("random_plan_probability", 0.0)
+            )
+            chosen["gain_over_no_help"] = -chosen["no_help_probability"]
+            chosen["gain_over_random"] = -chosen["random_plan_probability"]
+            chosen["trainable"] = True
             chosen["transfer_selected_for_preconditioning"] = True
             transfer_selected += 1
             changed_dimension += str(chosen.get("id")) != str(anchor.get("id"))
