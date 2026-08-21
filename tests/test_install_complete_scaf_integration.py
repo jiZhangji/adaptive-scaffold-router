@@ -1,6 +1,9 @@
 import unittest
 
-from install_complete_scaf_integration import patch_trainer_source
+from install_complete_scaf_integration import (
+    patch_trainer_source,
+    repair_invalid_dataloader_resume,
+)
 
 
 PARTIALLY_PATCHED = '''from verl.utils.tracking import ValidationGenerationsLogger
@@ -58,6 +61,22 @@ LEGACY_OFF_CONTEXT_PATCHED = PARTIALLY_PATCHED.replace(
 
 
 class CompleteScafInstallerTest(unittest.TestCase):
+    def test_recovers_incompatible_cross_stage_dataloader_cursor(self):
+        lines = [
+            "        for epoch in range(10):",
+            "            for batch_dict in self.train_dataloader:",
+            "                consume(batch_dict)",
+        ]
+        repair_invalid_dataloader_resume(lines)
+        text = "\n".join(lines)
+        self.assertIn("train_iterator = iter(self.train_dataloader)", text)
+        self.assertIn("except StopIteration:", text)
+        self.assertIn("self.train_dataloader.next_iter_state = None", text)
+        self.assertIn("for batch_dict in train_iterator:", text)
+        repaired = list(lines)
+        repair_invalid_dataloader_resume(repaired)
+        self.assertEqual(repaired, lines)
+
     def test_repairs_partial_patch_and_is_idempotent(self):
         patched = patch_trainer_source(PARTIALLY_PATCHED)
         self.assertIn("apply_sequence_weights", patched)

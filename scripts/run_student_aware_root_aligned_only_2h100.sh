@@ -40,6 +40,20 @@ RAY_TMP_BASE="${RAY_TMP_BASE:-/tmp/sar${UID}_$$}"
 [[ -s "$CONDA_SH" ]] || { echo "Conda initialization script is missing: $CONDA_SH" >&2; exit 2; }
 source "$CONDA_SH"
 
+reset_cross_stage_dataloader_state() {
+  local checkpoint_dir="$1"
+  local stage_tag="$2"
+  local state_file backup_file
+  for state_file in data.pt train_dataset_state.pt current_epoch.txt; do
+    if [[ -f "$checkpoint_dir/$state_file" ]]; then
+      backup_file="$checkpoint_dir/$state_file.$stage_tag.bak"
+      if [[ ! -e "$backup_file" ]]; then
+        mv "$checkpoint_dir/$state_file" "$backup_file"
+      fi
+    fi
+  done
+}
+
 if (( PRECONDITION_STEPS < 0 || ROOT_ALIGNED_END_STEP <= PRECONDITION_STEPS || TOTAL_STEPS <= ROOT_ALIGNED_END_STEP )); then
   echo "Require 0 <= PRECONDITION_STEPS < ROOT_ALIGNED_END_STEP < TOTAL_STEPS" >&2
   exit 2
@@ -128,6 +142,11 @@ SCAF_REPO="$SCAF_REPO" conda run --no-capture-output -n "$ENV_NAME" \
   2>&1 | tee "$RUN_ROOT/logs/install_integration.log"
 
 if [[ ! -d "$RUN_ROOT/proposed/checkpoints/global_step_$ROOT_ALIGNED_END_STEP/actor" ]]; then
+  # Stage 2 uses a different parquet dataset from Stage 1. Preserve the model
+  # and optimizer checkpoint, but do not restore the old StatefulDataLoader
+  # cursor into the new dataset.
+  reset_cross_stage_dataloader_state \
+    "$RUN_ROOT/proposed/checkpoints/global_step_$PRECONDITION_STEPS" "stage1"
   echo "Stage 2/3: root-aligned minimal-scaffold GRPO with fading and IS."
   CUDA_VISIBLE_DEVICES="$TRAIN_GPU" RAY_TMPDIR="$RAY_TMP_BASE/r" \
   MODE=fade_is TRAIN_STEPS="$ROOT_ALIGNED_END_STEP" \
@@ -148,6 +167,9 @@ if [[ ! -d "$RUN_ROOT/proposed/checkpoints/global_step_$ROOT_ALIGNED_END_STEP/ac
 fi
 
 if [[ ! -d "$RUN_ROOT/proposed/checkpoints/global_step_$TOTAL_STEPS/actor" ]]; then
+  # Stage 3 switches from scaffolded roots to the naked-root parquet.
+  reset_cross_stage_dataloader_state \
+    "$RUN_ROOT/proposed/checkpoints/global_step_$ROOT_ALIGNED_END_STEP" "stage2"
   echo "Stage 3/3: root-only consolidation to step $TOTAL_STEPS."
   CUDA_VISIBLE_DEVICES="$TRAIN_GPU" RAY_TMPDIR="$RAY_TMP_BASE/c" \
   TRAIN_STEPS="$TOTAL_STEPS" TRAIN_BATCH_SIZE="$TRAIN_BATCH_SIZE" \

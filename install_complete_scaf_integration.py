@@ -312,6 +312,35 @@ def repair_hint_level_statistics(lines: list[str]) -> None:
     ]
 
 
+def repair_invalid_dataloader_resume(lines: list[str]) -> None:
+    """Recover when a checkpoint cursor belongs to the previous stage dataset."""
+    marker = "Resetting incompatible cross-stage dataloader cursor"
+    if any(marker in line for line in lines):
+        return
+    loop_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip() == "for batch_dict in self.train_dataloader:"
+        ),
+        None,
+    )
+    if loop_index is None:
+        return
+    indent = lines[loop_index][
+        : len(lines[loop_index]) - len(lines[loop_index].lstrip())
+    ]
+    lines[loop_index : loop_index + 1] = [
+        f"{indent}try:",
+        f"{indent}    train_iterator = iter(self.train_dataloader)",
+        f"{indent}except StopIteration:",
+        f'{indent}    print("Resetting incompatible cross-stage dataloader cursor")',
+        f"{indent}    self.train_dataloader.next_iter_state = None",
+        f"{indent}    train_iterator = iter(self.train_dataloader)",
+        f"{indent}for batch_dict in train_iterator:",
+    ]
+
+
 def patch_trainer_source(source: str) -> str:
     lines = source.splitlines()
     ensure_runtime_imports(lines)
@@ -371,6 +400,7 @@ def patch_trainer_source(source: str) -> str:
 
     insert_off_context_replacement(lines)
     repair_hint_level_statistics(lines)
+    repair_invalid_dataloader_resume(lines)
     insert_importance_correction(lines)
     text = "\n".join(lines) + "\n"
     text = text.replace(
