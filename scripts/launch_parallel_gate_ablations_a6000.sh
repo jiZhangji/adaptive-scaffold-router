@@ -11,6 +11,7 @@ PEER_KEY="${PEER_KEY:-$HOME/.ssh/a6000_peer_ed25519}"
 SELECTED="${SELECTED:-$PROJECT_ROOT/outputs/transfer_selected_full_212.jsonl}"
 LEARNABILITY_A="${LEARNABILITY_A:-$PROJECT_ROOT/outputs/transfer_aware_all_selected_full_20260821_1920/learnability/subproblem_learnability.jsonl}"
 LEARNABILITY_B="${LEARNABILITY_B:-$PROJECT_ROOT/outputs/transfer_aware_positive_gated_full_20260821_1920/learnability/subproblem_learnability.jsonl}"
+BASELINE_RUN_ROOT="${BASELINE_RUN_ROOT:-$PROJECT_ROOT/outputs/complete_four_way_ordered_20260815_155120}"
 STAMP="${STAMP:-$(date +%Y%m%d_%H%M%S)}"
 RUN_A="${RUN_A:-$PROJECT_ROOT/outputs/transfer_gate_moderate_$STAMP}"
 RUN_B="${RUN_B:-$PROJECT_ROOT/outputs/transfer_gate_conservative_$STAMP}"
@@ -44,6 +45,7 @@ printf '%s\n' "independent_node_fixed_budget_v1" > "$RUN_A/parallel_protocol.txt
   printf '%s\\n' 'independent_node_fixed_budget_v1' > '$RUN_B/parallel_protocol.txt'"
 
 nohup env SELECTED_CANDIDATES="$SELECTED" RUN_ROOT="$RUN_A" \
+  BASELINE_RUN_ROOT="$BASELINE_RUN_ROOT" \
   RUN_SUBPROBLEM_PROBE=0 POSITIVE_TRANSFER_ONLY=1 \
   MIN_TRANSFER_GAIN=0.25 MIN_POST_UPDATE_PROBABILITY=0.5 \
   AUTO_EVAL=1 EVAL_GPUS=0 EVAL_N_GPUS=1 \
@@ -53,6 +55,7 @@ pid_a=$!
 
 "${SSH[@]}" "$PEER_HOST" "cd '$PROJECT_ROOT'; nohup env \
   SELECTED_CANDIDATES='$SELECTED' RUN_ROOT='$RUN_B' \
+  BASELINE_RUN_ROOT='$BASELINE_RUN_ROOT' \
   RUN_SUBPROBLEM_PROBE=0 POSITIVE_TRANSFER_ONLY=1 \
   MIN_TRANSFER_GAIN=0.5 MIN_POST_UPDATE_PROBABILITY=0.75 \
   AUTO_EVAL=1 EVAL_GPUS=0 EVAL_N_GPUS=1 \
