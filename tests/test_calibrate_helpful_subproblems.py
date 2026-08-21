@@ -28,6 +28,18 @@ class HelpfulSubproblemCalibrationTest(unittest.TestCase):
         candidate["source_step"] = "The missing side is 5"
         self.assertEqual(minimal_plan(candidate, 12), "")
 
+    def test_plan_tries_safe_relation_after_leaking_source_step(self):
+        candidate = {
+            "source_step": "The missing side is 5",
+            "relation": "Use the Pythagorean theorem before substitution",
+            "subproblem_answer": "5",
+            "reference": "13",
+        }
+        self.assertEqual(
+            minimal_plan(candidate, 12),
+            "Use the Pythagorean theorem before substitution",
+        )
+
     def test_q_is_root_success_and_must_beat_controls(self):
         candidate = {"id": "c", "dimension": "planning", "minimal_plan": "factor first"}
         records = []

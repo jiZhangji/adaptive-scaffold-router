@@ -26,6 +26,7 @@ SAVE_FREQ="${SAVE_FREQ:-5}"
 SCAFFOLD_READY_THRESHOLD="${SCAFFOLD_READY_THRESHOLD:-0.50}"
 CONTRAST_MIN="${CONTRAST_MIN:-0.0}"
 RUN_SUBPROBLEM_PROBE="${RUN_SUBPROBLEM_PROBE:-1}"
+POSITIVE_TRANSFER_ONLY="${POSITIVE_TRANSFER_ONLY:-0}"
 AUTO_EVAL="${AUTO_EVAL:-1}"
 EVAL_GPUS="${EVAL_GPUS:-0,1}"
 EVAL_N_GPUS="${EVAL_N_GPUS:-2}"
@@ -73,12 +74,18 @@ elif [[ -s "$RUN_ROOT/learnability/subproblem_learnability.jsonl" ]]; then
   LEARNABILITY_ARGS=(--learnability "$RUN_ROOT/learnability/subproblem_learnability.jsonl")
 fi
 
+BUILDER_ARGS=()
+if [[ "$POSITIVE_TRANSFER_ONLY" == "1" ]]; then
+  BUILDER_ARGS+=(--positive-transfer-only)
+fi
+
 conda run --no-capture-output -n "$ENV_NAME" python \
   "$PROJECT_ROOT/build_student_aware_preconditioning_experiment.py" \
   --source-data "$SOURCE_DATA" --candidates "$SELECTED_CANDIDATES" \
   "${LEARNABILITY_ARGS[@]}" --output-dir "$RUN_ROOT/data" \
   --scaffold-ready-threshold "$SCAFFOLD_READY_THRESHOLD" \
   --contrast-min "$CONTRAST_MIN" --group-size "$ROLLOUTS" \
+  "${BUILDER_ARGS[@]}" \
   2>&1 | tee "$RUN_ROOT/logs/build_data.log"
 
 PRECONDITION_ROWS="$(conda run --no-capture-output -n "$ENV_NAME" python - "$RUN_ROOT/data/summary.json" <<'PY'

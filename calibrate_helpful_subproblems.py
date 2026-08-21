@@ -58,19 +58,18 @@ def normalize(text: str) -> str:
 def minimal_plan(candidate: dict[str, Any], max_words: int) -> str:
     for key in ("source_step", "relation", "subproblem"):
         value = " ".join(str(candidate.get(key, "")).split())
-        if value:
-            break
-    else:
-        return ""
-    plan = " ".join(words(value)[:max_words]).strip(" .")
-    answer = normalize(str(candidate.get("subproblem_answer", "")))
-    root_answer = normalize(str(candidate.get("reference", "")))
-    normalized_plan = normalize(plan)
-    if not plan or (answer and answer in normalized_plan) or (
-        root_answer and root_answer in normalized_plan
-    ):
-        return ""
-    return plan
+        if not value:
+            continue
+        plan = " ".join(words(value)[:max_words]).strip(" .")
+        answer = normalize(str(candidate.get("subproblem_answer", "")))
+        root_answer = normalize(str(candidate.get("reference", "")))
+        normalized_plan = normalize(plan)
+        if not plan or (answer and answer in normalized_plan) or (
+            root_answer and root_answer in normalized_plan
+        ):
+            continue
+        return plan
+    return ""
 
 
 def root_prompt(question: str, plan: str = "") -> str:

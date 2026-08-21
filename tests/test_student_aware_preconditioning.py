@@ -13,11 +13,20 @@ from build_student_aware_preconditioning_experiment import (
     candidate_diagnostics,
     needs_preconditioning,
     run as build_experiment,
+    should_use_transfer_candidate,
 )
 from probe_selected_subproblem_learnability import aggregate_learnability
 
 
 class StudentAwarePreconditioningTests(unittest.TestCase):
+    def test_positive_transfer_gate(self):
+        positive = {"transfer_probe": {"proxy_transfer_gain": 0.25}}
+        zero = {"transfer_probe": {"proxy_transfer_gain": 0.0}}
+        negative = {"transfer_probe": {"proxy_transfer_gain": -0.25}}
+        self.assertTrue(should_use_transfer_candidate(positive, True))
+        self.assertFalse(should_use_transfer_candidate(zero, True))
+        self.assertFalse(should_use_transfer_candidate(negative, True))
+        self.assertTrue(should_use_transfer_candidate(negative, False))
     def test_combines_subproblem_contrast_and_root_relevance(self):
         candidate = {
             "success_probability": 0.25,
@@ -106,6 +115,7 @@ class StudentAwarePreconditioningTests(unittest.TestCase):
                     contrast_min=0.0,
                     group_size=8,
                     max_plan_words=12,
+                    positive_transfer_only=False,
                 )
             )
             summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))

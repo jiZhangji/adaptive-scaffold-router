@@ -67,6 +67,15 @@ def needs_preconditioning(
     return contrast is None or float(contrast) >= contrast_min
 
 
+def should_use_transfer_candidate(
+    candidate: dict[str, Any], positive_transfer_only: bool
+) -> bool:
+    if not positive_transfer_only:
+        return True
+    gain = candidate.get("transfer_probe", {}).get("proxy_transfer_gain")
+    return gain is not None and float(gain) > 0.0
+
+
 def make_scaffold_row(root: dict[str, Any], plan: str, metadata: dict[str, Any]) -> dict[str, Any]:
     row = copy.deepcopy(root)
     original = row.get("planning_skeleton_parts")
@@ -111,36 +120,58 @@ def run(args: argparse.Namespace) -> None:
     selected_pairs: list[dict[str, Any]] = []
     curriculum: list[dict[str, Any]] = []
     missing = 0
+    missing_plan = 0
+    transfer_enabled = 0
+    root_only_controls = 0
 
     for candidate in candidates:
         root = by_question.get(stable_question_key(str(candidate["question"])))
         if root is None:
             missing += 1
             continue
-        plan = str(candidate.get("minimal_plan") or minimal_plan(candidate, args.max_plan_words))
-        if not plan:
-            continue
+        use_subproblem = should_use_transfer_candidate(
+            candidate, args.positive_transfer_only
+        )
+        plan = (
+            str(candidate.get("minimal_plan") or minimal_plan(candidate, args.max_plan_words))
+            if use_subproblem
+            else ""
+        )
+        scaffold_available = bool(plan)
+        if use_subproblem:
+            transfer_enabled += 1
+            missing_plan += int(not scaffold_available)
+        else:
+            root_only_controls += 1
         diagnostics = candidate_diagnostics(
             candidate,
             learnability.get(str(candidate["id"])),
             args.group_size,
         )
-        precondition = needs_preconditioning(
-            diagnostics,
-            args.scaffold_ready_threshold,
-            args.contrast_min,
+        precondition = use_subproblem and needs_preconditioning(
+            diagnostics, args.scaffold_ready_threshold, args.contrast_min
         )
-        stage = "precondition" if precondition else "root_scaffold"
+        stage = (
+            "precondition"
+            if precondition
+            else ("root_scaffold" if scaffold_available else "root_only_control")
+        )
         metadata = {
             "student_aware_stage": stage,
             "minimal_plan": plan,
             "selected_candidate_id": str(candidate["id"]),
             "selected_dimension": str(candidate.get("dimension", "")),
+            "transfer_candidate_enabled": use_subproblem,
+            "scaffold_available": scaffold_available,
             **diagnostics,
         }
         root_copy = copy.deepcopy(root)
         root_only_rows.append(root_copy)
-        root_scaffold_rows.append(make_scaffold_row(root, plan, metadata))
+        root_scaffold_rows.append(
+            make_scaffold_row(root, plan, metadata)
+            if scaffold_available
+            else copy.deepcopy(root)
+        )
         if precondition:
             precondition_rows.extend(
                 [copy.deepcopy(root), _subproblem_row(root, {**candidate, "trainable": True})]
@@ -154,6 +185,8 @@ def run(args: argparse.Namespace) -> None:
                 "subproblem_answer": str(candidate["subproblem_answer"]),
                 "minimal_plan": plan,
                 "current_stage": stage,
+                "transfer_candidate_enabled": use_subproblem,
+                "scaffold_available": scaffold_available,
                 **diagnostics,
             }
         )
@@ -161,18 +194,20 @@ def run(args: argparse.Namespace) -> None:
             {
                 "root_id": str(candidate["root_id"]),
                 "question_key": stable_question_key(str(root["question"])),
-                "phase": "guided_root",
+                "phase": "guided_root" if scaffold_available else "unguided_root",
                 "reason": (
-                    "Student-aware minimal plan is root-relevant; independent preconditioning "
-                    "is used only when scaffold usability is below the configured threshold."
+                    "Use the selected minimal scaffold when transfer is enabled and a safe "
+                    "answer-free plan exists; otherwise retain an unguided root control."
                 ),
                 "root_success": float(diagnostics["q_no"]),
                 "informative_probability": informative_group_probability(
                     float(diagnostics["q_no"]), args.group_size
                 ),
-                "selected_scaffold": "planning@100",
+                "selected_scaffold": "planning@100" if scaffold_available else None,
                 "selected_scaffold_success": float(diagnostics["q_help"]),
-                "active_subproblem_ids": [str(candidate["id"])],
+                "active_subproblem_ids": (
+                    [str(candidate["id"])] if use_subproblem else []
+                ),
                 "unresolved_subproblem_ids": (
                     [str(candidate["id"])] if precondition else []
                 ),
@@ -212,6 +247,10 @@ def run(args: argparse.Namespace) -> None:
         "precondition_rows": len(precondition_rows),
         "learnability_rows": len(learnability_rows),
         "missing_source_rows": missing,
+        "missing_safe_plan_rows": missing_plan,
+        "transfer_enabled_roots": transfer_enabled,
+        "root_only_control_roots": root_only_controls,
+        "positive_transfer_only": args.positive_transfer_only,
         "scaffold_ready_threshold": args.scaffold_ready_threshold,
         "contrast_min": args.contrast_min,
         "group_size": args.group_size,
@@ -237,6 +276,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--contrast-min", type=float, default=0.0)
     parser.add_argument("--group-size", type=int, default=8)
     parser.add_argument("--max-plan-words", type=int, default=12)
+    parser.add_argument("--positive-transfer-only", action="store_true")
     return parser.parse_args()
 
 
