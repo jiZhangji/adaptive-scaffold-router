@@ -15,6 +15,21 @@ from calibrate_helpful_subproblems import read_jsonl
 from frontier_probe import SYSTEM_PROMPT, build_math_verifier
 
 
+def indexed_root_shard(
+    roots: list[str], num_shards: int, shard_index: int
+) -> list[tuple[int, str]]:
+    """Return a deterministic shard while retaining each root's global index."""
+    if num_shards < 1:
+        raise ValueError("num_shards must be at least 1")
+    if not 0 <= shard_index < num_shards:
+        raise ValueError("shard_index must satisfy 0 <= shard_index < num_shards")
+    return [
+        (global_index, root_id)
+        for global_index, root_id in enumerate(roots)
+        if global_index % num_shards == shard_index
+    ]
+
+
 def chat_prompt(tokenizer: Any, question: str) -> str:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -130,7 +145,14 @@ def run(args: argparse.Namespace) -> None:
     initial = adapter_state(model)
     verifier = build_math_verifier()
 
-    for root_index, root_id in enumerate(eligible):
+    indexed_roots = indexed_root_shard(eligible, args.num_shards, args.shard_index)
+    print(
+        f"Shard {args.shard_index}/{args.num_shards}: "
+        f"{len(indexed_roots)} of {len(eligible)} eligible roots",
+        flush=True,
+    )
+
+    for local_index, (global_index, root_id) in enumerate(indexed_roots):
         candidates = sorted(by_root[root_id], key=lambda row: str(row["dimension"]))
         question = str(candidates[0]["question"])
         reference = str(candidates[0]["reference"])
@@ -144,7 +166,7 @@ def run(args: argparse.Namespace) -> None:
             args.max_new_tokens,
             args.temperature,
             args.top_p,
-            args.seed + root_index * 1000,
+            args.seed + global_index * 1000,
             args.device,
         )
         baseline_correct = [bool(verifier(text, reference)) for text in baseline_texts]
@@ -188,7 +210,7 @@ def run(args: argparse.Namespace) -> None:
                 args.max_new_tokens,
                 args.temperature,
                 args.top_p,
-                args.seed + root_index * 1000,
+                args.seed + global_index * 1000,
                 args.device,
             )
             post_correct = [bool(verifier(text, reference)) for text in post_texts]
@@ -214,7 +236,8 @@ def run(args: argparse.Namespace) -> None:
                 handle.flush()
             completed.add(candidate_id)
             print(
-                f"[{root_index + 1}/{len(eligible)}] {candidate_id} "
+                f"[shard {local_index + 1}/{len(indexed_roots)}; "
+                f"global {global_index + 1}/{len(eligible)}] {candidate_id} "
                 f"baseline={baseline_p:.3f} post={post_p:.3f} "
                 f"gain={post_p - baseline_p:+.3f}",
                 flush=True,
@@ -225,6 +248,9 @@ def run(args: argparse.Namespace) -> None:
     all_results = read_jsonl(args.output)
     summary = {
         "eligible_roots": len(eligible),
+        "shard_roots": len(indexed_roots),
+        "num_shards": args.num_shards,
+        "shard_index": args.shard_index,
         "completed_candidates": len(all_results),
         "mean_proxy_transfer_gain": (
             sum(float(row["proxy_transfer_gain"]) for row in all_results) / len(all_results)
@@ -246,6 +272,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--root-limit", type=int, default=16)
+    parser.add_argument("--num-shards", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     parser.add_argument("--root-samples", type=int, default=4)
     parser.add_argument("--probe-steps", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=2e-4)
