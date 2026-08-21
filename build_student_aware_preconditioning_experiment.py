@@ -68,12 +68,30 @@ def needs_preconditioning(
 
 
 def should_use_transfer_candidate(
-    candidate: dict[str, Any], positive_transfer_only: bool
+    candidate: dict[str, Any],
+    positive_transfer_only: bool,
+    min_transfer_gain: float | None = None,
+    min_post_update_probability: float | None = None,
 ) -> bool:
-    if not positive_transfer_only:
+    if (
+        not positive_transfer_only
+        and min_transfer_gain is None
+        and min_post_update_probability is None
+    ):
         return True
-    gain = candidate.get("transfer_probe", {}).get("proxy_transfer_gain")
-    return gain is not None and float(gain) > 0.0
+    probe = candidate.get("transfer_probe", {})
+    gain = probe.get("proxy_transfer_gain")
+    post = probe.get("post_update_probability")
+    if gain is None:
+        return False
+    if positive_transfer_only and float(gain) <= 0.0:
+        return False
+    if min_transfer_gain is not None and float(gain) < min_transfer_gain:
+        return False
+    if min_post_update_probability is not None:
+        if post is None or float(post) < min_post_update_probability:
+            return False
+    return True
 
 
 def make_scaffold_row(root: dict[str, Any], plan: str, metadata: dict[str, Any]) -> dict[str, Any]:
@@ -130,7 +148,10 @@ def run(args: argparse.Namespace) -> None:
             missing += 1
             continue
         use_subproblem = should_use_transfer_candidate(
-            candidate, args.positive_transfer_only
+            candidate,
+            args.positive_transfer_only,
+            args.min_transfer_gain,
+            args.min_post_update_probability,
         )
         plan = (
             str(candidate.get("minimal_plan") or minimal_plan(candidate, args.max_plan_words))
@@ -251,6 +272,8 @@ def run(args: argparse.Namespace) -> None:
         "transfer_enabled_roots": transfer_enabled,
         "root_only_control_roots": root_only_controls,
         "positive_transfer_only": args.positive_transfer_only,
+        "min_transfer_gain": args.min_transfer_gain,
+        "min_post_update_probability": args.min_post_update_probability,
         "scaffold_ready_threshold": args.scaffold_ready_threshold,
         "contrast_min": args.contrast_min,
         "group_size": args.group_size,
@@ -277,6 +300,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--group-size", type=int, default=8)
     parser.add_argument("--max-plan-words", type=int, default=12)
     parser.add_argument("--positive-transfer-only", action="store_true")
+    parser.add_argument("--min-transfer-gain", type=float, default=None)
+    parser.add_argument("--min-post-update-probability", type=float, default=None)
     return parser.parse_args()
 
 

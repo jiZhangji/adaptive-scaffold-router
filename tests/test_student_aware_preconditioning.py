@@ -27,6 +27,30 @@ class StudentAwarePreconditioningTests(unittest.TestCase):
         self.assertFalse(should_use_transfer_candidate(zero, True))
         self.assertFalse(should_use_transfer_candidate(negative, True))
         self.assertTrue(should_use_transfer_candidate(negative, False))
+        confident = {
+            "transfer_probe": {
+                "proxy_transfer_gain": 0.25,
+                "post_update_probability": 0.75,
+            }
+        }
+        uncertain = {
+            "transfer_probe": {
+                "proxy_transfer_gain": 0.25,
+                "post_update_probability": 0.25,
+            }
+        }
+        self.assertTrue(
+            should_use_transfer_candidate(
+                confident, True, min_transfer_gain=0.25,
+                min_post_update_probability=0.5,
+            )
+        )
+        self.assertFalse(
+            should_use_transfer_candidate(
+                uncertain, True, min_transfer_gain=0.25,
+                min_post_update_probability=0.5,
+            )
+        )
     def test_combines_subproblem_contrast_and_root_relevance(self):
         candidate = {
             "success_probability": 0.25,
@@ -116,6 +140,8 @@ class StudentAwarePreconditioningTests(unittest.TestCase):
                     group_size=8,
                     max_plan_words=12,
                     positive_transfer_only=False,
+                    min_transfer_gain=None,
+                    min_post_update_probability=None,
                 )
             )
             summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))

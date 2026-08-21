@@ -19,6 +19,8 @@ GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.35}"
 ACTOR_MICRO_BATCH_SIZE="${ACTOR_MICRO_BATCH_SIZE:-2}"
 LOG_PROB_MICRO_BATCH_SIZE="${LOG_PROB_MICRO_BATCH_SIZE:-2}"
 REF_LOG_PROB_MICRO_BATCH_SIZE="${REF_LOG_PROB_MICRO_BATCH_SIZE:-2}"
+N_GPUS="${N_GPUS:-1}"
+NNODES="${NNODES:-1}"
 FREE_CACHE_ENGINE="${FREE_CACHE_ENGINE:-true}"
 RESUME_MODE="${RESUME_MODE:-auto}"
 CURRICULUM_MANIFEST="${CURRICULUM_MANIFEST:-}"
@@ -77,7 +79,7 @@ args=(
   actor_rollout_ref.actor.optim.lr_warmup_steps_ratio=0.0
   actor_rollout_ref.actor.optim.warmup_style=constant
   actor_rollout_ref.actor.optim.weight_decay=0.0
-  trainer.nnodes=1 trainer.n_gpus_per_node=1 trainer.total_epochs=100
+  "trainer.nnodes=$NNODES" "trainer.n_gpus_per_node=$N_GPUS" trainer.total_epochs=100
   "trainer.total_training_steps=$TRAIN_STEPS"
   "trainer.save_freq=$SAVE_FREQ" trainer.test_freq=-1
   trainer.val_before_train=false trainer.val_only=false "trainer.resume_mode=$RESUME_MODE"
