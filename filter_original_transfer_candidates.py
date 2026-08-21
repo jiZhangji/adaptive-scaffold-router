@@ -27,7 +27,7 @@ def run(args: argparse.Namespace) -> None:
         row = dict(row)
         row["candidate_origin"] = "original_deepseek_three_candidate_set"
         row["minimal_plan"] = str(row.get("minimal_plan") or minimal_plan(row, 12))
-        if row["minimal_plan"]:
+        if row["minimal_plan"] or args.allow_empty_minimal_plan:
             by_root[root_id].append(row)
 
     complete = {
@@ -58,6 +58,10 @@ def run(args: argparse.Namespace) -> None:
         "matched_complete_roots": len(complete),
         "output_rows": len(output_rows),
         "dimension_counts": dict(Counter(str(row["dimension"]) for row in output_rows)),
+        "empty_minimal_plan_rows": sum(
+            not str(row.get("minimal_plan", "")).strip() for row in output_rows
+        ),
+        "allow_empty_minimal_plan": args.allow_empty_minimal_plan,
         "source": str(args.original_candidates),
     }
     args.output.with_suffix(".summary.json").write_text(
@@ -72,6 +76,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--original-candidates", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--min-complete-roots", type=int, default=16)
+    parser.add_argument(
+        "--allow-empty-minimal-plan",
+        action="store_true",
+        help=(
+            "Retain complete K/P/C candidate sets for transfer probing even when the "
+            "legacy answer-leak filter cannot derive a root scaffold."
+        ),
+    )
     return parser.parse_args()
 
 
