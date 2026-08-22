@@ -66,8 +66,8 @@ remote "cd '$PROJECT_ROOT'; nohup env PROJECT_ROOT='$PROJECT_ROOT' \
   > '$RUN_ROOT/logs/probe_seed_${SEED_B}.log' 2>&1 < /dev/null & echo \$! > '$RUN_ROOT/probe_b.pid'"
 
 while [[ ! -s "$exit_a" ]] || ! remote "test -s '$exit_b'"; do
-  count_a="$(wc -l < "$probe_a" 2>/dev/null || echo 0)"
-  count_b="$(remote "wc -l < '$probe_b' 2>/dev/null || echo 0")"
+  count_a="$(if [[ -f "$probe_a" ]]; then wc -l < "$probe_a"; else echo 0; fi)"
+  count_b="$(remote "if [[ -f '$probe_b' ]]; then wc -l < '$probe_b'; else echo 0; fi")"
   printf '%s probe A=%s/636 B=%s/636\n' "$(date '+%F %T')" "$count_a" "$count_b"
   sleep "$POLL_SECONDS"
 done
