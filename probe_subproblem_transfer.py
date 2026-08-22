@@ -114,7 +114,7 @@ def run(args: argparse.Namespace) -> None:
     for row in rows:
         by_root[str(row["root_id"])].append(row)
     eligible = [root for root, values in by_root.items() if len(values) >= 2]
-    random.Random(args.seed).shuffle(eligible)
+    random.Random(args.selection_seed).shuffle(eligible)
     if args.root_limit > 0:
         eligible = eligible[: args.root_limit]
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -219,6 +219,8 @@ def run(args: argparse.Namespace) -> None:
                 "root_id": root_id,
                 "candidate_id": candidate_id,
                 "dimension": str(candidate.get("dimension", "")),
+                "probe_seed": args.seed,
+                "selection_seed": args.selection_seed,
                 "baseline_probability": baseline_p,
                 "post_update_probability": post_p,
                 "proxy_transfer_gain": post_p - baseline_p,
@@ -287,6 +289,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--top-p", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--selection-seed", type=int, default=42)
     return parser.parse_args()
 
 

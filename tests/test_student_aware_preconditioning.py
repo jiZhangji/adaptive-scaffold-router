@@ -15,10 +15,21 @@ from build_student_aware_preconditioning_experiment import (
     run as build_experiment,
     should_use_transfer_candidate,
 )
-from probe_selected_subproblem_learnability import aggregate_learnability
+from probe_selected_subproblem_learnability import active_candidates, aggregate_learnability
 
 
 class StudentAwarePreconditioningTests(unittest.TestCase):
+    def test_active_candidates_can_skip_rcst_abstentions(self):
+        rows = [
+            {"id": "accepted", "transfer_probe": {"proxy_transfer_gain": 0.5}},
+            {"id": "fallback", "rcst_abstained": True},
+            {"id": "ordinary"},
+        ]
+        self.assertEqual(
+            [row["id"] for row in active_candidates(rows, transfer_only=True)],
+            ["accepted"],
+        )
+
     def test_positive_transfer_gate(self):
         positive = {"transfer_probe": {"proxy_transfer_gain": 0.25}}
         zero = {"transfer_probe": {"proxy_transfer_gain": 0.0}}

@@ -21,6 +21,18 @@ from frontier_probe import SYSTEM_PROMPT, build_math_verifier
 from metaask_probe import LocalGenerator, chat_prompt
 
 
+def active_candidates(
+    candidates: list[dict[str, Any]], transfer_only: bool
+) -> list[dict[str, Any]]:
+    if not transfer_only:
+        return candidates
+    return [
+        row
+        for row in candidates
+        if row.get("transfer_probe") and not bool(row.get("rcst_abstained", False))
+    ]
+
+
 def aggregate_learnability(
     candidates: list[dict[str, Any]],
     records: list[dict[str, Any]],
@@ -58,7 +70,9 @@ def run(args: argparse.Namespace) -> None:
     result_path = args.output_dir / "subproblem_rollouts.jsonl"
     summary_path = args.output_dir / "subproblem_learnability.jsonl"
 
-    candidates = read_jsonl(args.candidates)
+    candidates = active_candidates(
+        read_jsonl(args.candidates), args.active_transfer_only
+    )
     existing = read_jsonl(result_path) if result_path.exists() else []
     completed = {
         (str(row["candidate_id"]), int(row["sample_index"])) for row in existing
@@ -154,6 +168,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trust-remote-code", action="store_true")
     parser.add_argument("--stop-after-boxed", action="store_true")
     parser.add_argument("--stop-check-interval", type=int, default=16)
+    parser.add_argument("--active-transfer-only", action="store_true")
     return parser.parse_args()
 
 

@@ -26,6 +26,7 @@ SAVE_FREQ="${SAVE_FREQ:-5}"
 SCAFFOLD_READY_THRESHOLD="${SCAFFOLD_READY_THRESHOLD:-0.50}"
 CONTRAST_MIN="${CONTRAST_MIN:-0.0}"
 RUN_SUBPROBLEM_PROBE="${RUN_SUBPROBLEM_PROBE:-1}"
+LEARNABILITY_TRANSFER_ONLY="${LEARNABILITY_TRANSFER_ONLY:-0}"
 POSITIVE_TRANSFER_ONLY="${POSITIVE_TRANSFER_ONLY:-0}"
 MIN_TRANSFER_GAIN="${MIN_TRANSFER_GAIN:-}"
 MIN_POST_UPDATE_PROBABILITY="${MIN_POST_UPDATE_PROBABILITY:-}"
@@ -77,6 +78,10 @@ done
 LEARNABILITY_ARGS=()
 if [[ "$RUN_SUBPROBLEM_PROBE" == "1" ]]; then
   echo "Probing selected subproblem learnability; baseline training is not repeated."
+  LEARNABILITY_FILTER_ARGS=()
+  if [[ "$LEARNABILITY_TRANSFER_ONLY" == "1" ]]; then
+    LEARNABILITY_FILTER_ARGS+=(--active-transfer-only)
+  fi
   CUDA_VISIBLE_DEVICES="$TRAIN_GPU" conda run --no-capture-output -n "$ENV_NAME" python \
     "$PROJECT_ROOT/probe_selected_subproblem_learnability.py" \
     --candidates "$SELECTED_CANDIDATES" --model "$MODEL_PATH" \
@@ -84,6 +89,7 @@ if [[ "$RUN_SUBPROBLEM_PROBE" == "1" ]]; then
     --group-size "$ROLLOUTS" --batch-size 16 --job-chunk-size 128 \
     --device cuda:0 --dtype bfloat16 --max-input-tokens 2048 \
     --max-new-tokens 1024 --temperature 1.0 --top-p 1.0 --stop-after-boxed \
+    "${LEARNABILITY_FILTER_ARGS[@]}" \
     2>&1 | tee "$RUN_ROOT/logs/subproblem_probe.log"
   LEARNABILITY_ARGS=(--learnability "$RUN_ROOT/learnability/subproblem_learnability.jsonl")
 elif [[ -s "$RUN_ROOT/learnability/subproblem_learnability.jsonl" ]]; then
