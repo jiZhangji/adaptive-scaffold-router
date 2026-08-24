@@ -53,7 +53,9 @@ sync_file() {
 command -v rsync >/dev/null || { echo "rsync is missing on the source server" >&2; exit 2; }
 
 echo "===== PEER CONNECTIVITY ====="
-remote "set -e; echo host=\$(hostname); echo ips=\$(hostname -I); command -v rsync; test -x /opt/miniconda3/bin/conda"
+remote "set -e; echo host=\$(hostname); echo ips=\$(hostname -I); command -v rsync; \
+  if test -x /opt/miniconda3/bin/conda; then echo target_conda=/opt/miniconda3/bin/conda; \
+  else echo target_conda=missing_using_synced_prefix_python; fi"
 
 echo "===== PROJECT CODE ====="
 sync_tree "$SOURCE_REPO" "$TARGET_REPO" \
@@ -101,8 +103,12 @@ fi
 
 echo "===== REGISTER AND VERIFY ENVIRONMENT ====="
 remote "set -e; \
-  /opt/miniconda3/bin/conda config --add envs_dirs '$TARGET_ROOT/envs' 2>/dev/null || true; \
-  /opt/miniconda3/bin/conda run -p '$TARGET_ROOT/envs/scaf-grpo' python -c \"import torch, flash_attn; print('python_ok'); print('torch=' + torch.__version__); print('cuda=' + str(torch.version.cuda)); print('gpu=' + torch.cuda.get_device_name(0)); print('flash_attn=' + flash_attn.__version__)\"; \
+  if test -x /opt/miniconda3/bin/conda; then \
+    /opt/miniconda3/bin/conda config --add envs_dirs '$TARGET_ROOT/envs' 2>/dev/null || true; \
+    /opt/miniconda3/bin/conda run -p '$TARGET_ROOT/envs/scaf-grpo' python -c \"import torch, flash_attn; print('python_ok'); print('torch=' + torch.__version__); print('cuda=' + str(torch.version.cuda)); print('gpu=' + torch.cuda.get_device_name(0)); print('flash_attn=' + flash_attn.__version__)\"; \
+  else \
+    '$TARGET_ROOT/envs/scaf-grpo/bin/python' -c \"import torch, flash_attn; print('python_ok'); print('torch=' + torch.__version__); print('cuda=' + str(torch.version.cuda)); print('gpu=' + torch.cuda.get_device_name(0)); print('flash_attn=' + flash_attn.__version__)\"; \
+  fi; \
   test -s '$TARGET_REPO/models/Qwen2.5-Math-1.5B/config.json'; \
   test -s '$TARGET_REPO/data/DeepScaleR/Qwen2.5-Math-1.5B.parquet'; \
   test -s '$TARGET_REPO/outputs/deepseek_zero_reward_subproblems_all/candidates.jsonl'; \
