@@ -121,6 +121,39 @@ def run(args: argparse.Namespace) -> None:
     existing = read_jsonl(args.output) if args.output.exists() else []
     completed = {str(row["candidate_id"]) for row in existing}
 
+    indexed_roots = indexed_root_shard(eligible, args.num_shards, args.shard_index)
+    indexed_roots = [
+        (global_index, root_id)
+        for global_index, root_id in indexed_roots
+        if any(str(candidate["id"]) not in completed for candidate in by_root[root_id])
+    ]
+    print(
+        f"Shard {args.shard_index}/{args.num_shards}: "
+        f"{len(indexed_roots)} incomplete of {len(eligible)} eligible roots",
+        flush=True,
+    )
+
+    if not indexed_roots:
+        summary = {
+            "eligible_roots": len(eligible),
+            "shard_roots": 0,
+            "num_shards": args.num_shards,
+            "shard_index": args.shard_index,
+            "completed_candidates": len(existing),
+            "mean_proxy_transfer_gain": (
+                sum(float(row["proxy_transfer_gain"]) for row in existing) / len(existing)
+                if existing
+                else 0.0
+            ),
+            "definition": "temporary LoRA SFT update followed by same-root no-hint evaluation",
+            "warning": "This is a low-cost proxy, not an unbiased causal estimate of full GRPO transfer.",
+        }
+        args.output.with_suffix(".summary.json").write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+        return
+
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     tokenizer.padding_side = "left"
     if tokenizer.pad_token_id is None:
@@ -144,13 +177,6 @@ def run(args: argparse.Namespace) -> None:
     model = get_peft_model(base, config)
     initial = adapter_state(model)
     verifier = build_math_verifier()
-
-    indexed_roots = indexed_root_shard(eligible, args.num_shards, args.shard_index)
-    print(
-        f"Shard {args.shard_index}/{args.num_shards}: "
-        f"{len(indexed_roots)} of {len(eligible)} eligible roots",
-        flush=True,
-    )
 
     for local_index, (global_index, root_id) in enumerate(indexed_roots):
         candidates = sorted(by_root[root_id], key=lambda row: str(row["dimension"]))
