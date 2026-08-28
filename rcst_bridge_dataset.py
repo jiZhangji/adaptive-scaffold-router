@@ -9,6 +9,15 @@ trainer to score the *same response* under root+subproblem context.
 from __future__ import annotations
 
 import copy
+import sys
+from pathlib import Path
+
+# VERL loads custom datasets directly from their file path.  In that mode the
+# file's parent directory is not guaranteed to be present in sys.path, so make
+# sibling project modules importable before resolving bridge_prompt_utils.
+MODULE_DIR = str(Path(__file__).resolve().parent)
+if MODULE_DIR not in sys.path:
+    sys.path.insert(0, MODULE_DIR)
 
 from bridge_prompt_utils import build_bridge_messages
 from verl.utils.dataset.rl_dataset import RLHFDataset

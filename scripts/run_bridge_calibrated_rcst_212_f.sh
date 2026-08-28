@@ -161,6 +161,7 @@ test -s "$PROJECT_ROOT/scaf_integration/ray_trainer_bridge.py"
 cp "$SCAF_REPO/verl/trainer/ppo/ray_trainer.py" "$TRAIN_ROOT/logs/ray_trainer.before_bridge.py"
 cp "$PROJECT_ROOT/scaf_integration/ray_trainer_bridge.py" "$SCAF_REPO/verl/trainer/ppo/ray_trainer.py"
 if CUDA_VISIBLE_DEVICES=0,1 N_GPUS=2 NNODES=1 TP_SIZE=1 \
+  PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128 \
   SCAF_REPO="$SCAF_REPO" \
   MODEL_PATH="$MODEL_PATH" TRAIN_DATA="$DATA_DIR/rcst_lcb_delta_212.parquet" \
   OUTPUT_DIR="$TRAIN_ROOT/train_rcst" TRAIN_STEPS="$TRAIN_STEPS" \
