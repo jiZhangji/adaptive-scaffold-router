@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--all-selected", type=Path, required=True)
     parser.add_argument("--rcst-selected", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--expected-roots", type=int, default=212)
     args = parser.parse_args()
 
     import pandas as pd
@@ -31,7 +32,15 @@ def main() -> None:
         stable_question_key(str(row["question"])): row
         for row in source.to_dict(orient="records")
     }
-    all_selected = read_jsonl(args.all_selected)
+    all_selected_raw = read_jsonl(args.all_selected)
+    all_selected_by_root: dict[str, dict] = {}
+    for candidate in all_selected_raw:
+        root_id = str(candidate["root_id"])
+        previous = all_selected_by_root.get(root_id)
+        if previous is not None and str(previous["question"]) != str(candidate["question"]):
+            raise ValueError(f"Inconsistent questions for root: {root_id}")
+        all_selected_by_root.setdefault(root_id, candidate)
+    all_selected = [all_selected_by_root[root_id] for root_id in sorted(all_selected_by_root)]
     rcst_rows = read_jsonl(args.rcst_selected)
     rcst_accepted = {
         str(row["root_id"]): row
@@ -65,22 +74,26 @@ def main() -> None:
             )
             row["extra_info"] = extra
             rows.append(row)
-        if len(rows) != 212:
-            raise ValueError(f"Expected 212 roots, found {len(rows)}")
+        if len(rows) != args.expected_roots:
+            raise ValueError(f"Expected {args.expected_roots} roots, found {len(rows)}")
         return rows
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     all_rows = build("all")
     rcst_gate_rows = build("rcst_lcb")
-    pd.DataFrame(all_rows).to_parquet(args.output_dir / "delta_all_212.parquet", index=False)
-    pd.DataFrame(rcst_gate_rows).to_parquet(args.output_dir / "rcst_lcb_delta_212.parquet", index=False)
+    pd.DataFrame(all_rows).to_parquet(
+        args.output_dir / f"delta_all_{args.expected_roots}.parquet", index=False
+    )
+    pd.DataFrame(rcst_gate_rows).to_parquet(
+        args.output_dir / f"rcst_lcb_delta_{args.expected_roots}.parquet", index=False
+    )
     summary = {
-        "roots": 212,
+        "roots": args.expected_roots,
         "all_enabled": sum(bool((row.get("extra_info") or {}).get("bridge_enabled")) for row in all_rows),
         "rcst_enabled": sum(
             bool((row.get("extra_info") or {}).get("bridge_enabled")) for row in rcst_gate_rows
         ),
-        "rcst_abstained": 212 - len(rcst_accepted),
+        "rcst_abstained": args.expected_roots - len(rcst_accepted),
     }
     (args.output_dir / "summary.json").write_text(
         json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
