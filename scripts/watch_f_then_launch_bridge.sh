@@ -6,10 +6,11 @@ set -Eeuo pipefail
 
 F_SSH_HOST="${F_SSH_HOST:-a6000-f}"
 CHECK_SECONDS="${CHECK_SECONDS:-60}"
-F_IDLE_SECONDS="${F_IDLE_SECONDS:-1800}"
+F_IDLE_SECONDS="${F_IDLE_SECONDS:-600}"
 REMOTE_PROJECT="${REMOTE_PROJECT:-/home/powerleader/project/adaptive-scaffold-router}"
 LOCAL_PROJECT="${LOCAL_PROJECT:-/home/powerleader/project/adaptive-scaffold-router}"
 WATCH_ROOT="${WATCH_ROOT:-$LOCAL_PROJECT/outputs/f_boot_watchdog}"
+SYNC_BEFORE_LAUNCH="${SYNC_BEFORE_LAUNCH:-1}"
 LOCK_DIR="$WATCH_ROOT/watch.lock"
 STATE_FILE="$WATCH_ROOT/state.txt"
 
@@ -44,6 +45,31 @@ while true; do
 
   log "F is reachable; checking and launching the Bridge-Calibrated RCST workflow"
   write_state f_reachable
+  if [[ "$SYNC_BEFORE_LAUNCH" == "1" ]]; then
+    if ! ssh "$F_SSH_HOST" \
+        "mkdir -p '$REMOTE_PROJECT/scripts' '$REMOTE_PROJECT/scaf_integration'" \
+      || ! scp \
+        "$LOCAL_PROJECT/bridge_prompt_utils.py" \
+        "$LOCAL_PROJECT/build_rcst_bridge_data.py" \
+        "$LOCAL_PROJECT/fit_bridge_calibrated_rcst.py" \
+        "$LOCAL_PROJECT/monitor_gpu_idle_then_run.py" \
+        "$LOCAL_PROJECT/rcst_bridge_dataset.py" \
+        "$LOCAL_PROJECT/score_bridge_delta_features.py" \
+        "$F_SSH_HOST:$REMOTE_PROJECT/" \
+      || ! scp \
+        "$LOCAL_PROJECT/scripts/run_bridge_calibrated_rcst_212_f.sh" \
+        "$LOCAL_PROJECT/scripts/run_fixed_budget_grpo_arm_1gpu.sh" \
+        "$F_SSH_HOST:$REMOTE_PROJECT/scripts/" \
+      || ! scp \
+        "$LOCAL_PROJECT/scaf_integration/ray_trainer_bridge.py" \
+        "$F_SSH_HOST:$REMOTE_PROJECT/scaf_integration/"; then
+      log "F became unavailable while synchronizing code; retrying"
+      write_state sync_failed_retrying
+      sleep "$CHECK_SECONDS"
+      continue
+    fi
+    log "latest workflow code synchronized from C to F"
+  fi
   set +e
   ssh "$F_SSH_HOST" \
     "PROJECT_ROOT='$REMOTE_PROJECT' IDLE_SECONDS='$F_IDLE_SECONDS' bash -s" <<'REMOTE'

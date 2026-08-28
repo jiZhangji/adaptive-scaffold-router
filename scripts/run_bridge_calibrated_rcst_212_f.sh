@@ -16,7 +16,7 @@ AGGREGATES="$ASSETS/rcst_aggregated.jsonl"
 SOURCE_DATA="${SOURCE_DATA:-$PROJECT_ROOT/data/DeepScaleR/Qwen2.5-Math-1.5B.parquet}"
 ALL_SELECTED="${ALL_SELECTED:-$PROJECT_ROOT/outputs/bridge_212_assets/transfer_selected_candidates.jsonl}"
 POLL_SECONDS="${POLL_SECONDS:-60}"
-IDLE_REQUIRED_SECONDS="${IDLE_REQUIRED_SECONDS:-1800}"
+IDLE_REQUIRED_SECONDS="${IDLE_REQUIRED_SECONDS:-600}"
 SKIP_IDLE_WAIT="${SKIP_IDLE_WAIT:-0}"
 TRAIN_STEPS="${TRAIN_STEPS:-50}"
 RUN_FORMAL_TRAINING="${RUN_FORMAL_TRAINING:-1}"
@@ -76,52 +76,65 @@ common=(
   --batch-size 4
 )
 
-echo "[$(date -Is)] one-root smoke test"
-rm -f "$DELTA_DIR/smoke.jsonl" "$DELTA_DIR/smoke.summary.json"
-CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" "$PROJECT_ROOT/score_bridge_delta_features.py" \
-  "${common[@]}" --output "$DELTA_DIR/smoke.jsonl" \
-  --num-shards 212 --shard-index 0 \
-  > "$BASE/logs/delta_smoke.log" 2>&1
-test "$(wc -l < "$DELTA_DIR/smoke.jsonl")" -eq 3
-rm -f "$DELTA_DIR/smoke.jsonl" "$DELTA_DIR/smoke.summary.json"
+delta_total=0
+if [[ -s "$DELTA_DIR/shard_0.jsonl" && -s "$DELTA_DIR/shard_1.jsonl" ]]; then
+  delta_total="$(( $(wc -l < "$DELTA_DIR/shard_0.jsonl") + $(wc -l < "$DELTA_DIR/shard_1.jsonl") ))"
+fi
+if (( delta_total == 636 )); then
+  echo "[$(date -Is)] all 636 delta rows already exist; skipping delta scoring"
+else
+  echo "[$(date -Is)] one-root smoke test"
+  rm -f "$DELTA_DIR/smoke.jsonl" "$DELTA_DIR/smoke.summary.json"
+  CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" "$PROJECT_ROOT/score_bridge_delta_features.py" \
+    "${common[@]}" --output "$DELTA_DIR/smoke.jsonl" \
+    --num-shards 212 --shard-index 0 \
+    > "$BASE/logs/delta_smoke.log" 2>&1
+  test "$(wc -l < "$DELTA_DIR/smoke.jsonl")" -eq 3
+  rm -f "$DELTA_DIR/smoke.jsonl" "$DELTA_DIR/smoke.summary.json"
 
-echo "[$(date -Is)] launching two system-preserving delta shards"
-CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" "$PROJECT_ROOT/score_bridge_delta_features.py" \
-  "${common[@]}" --output "$DELTA_DIR/shard_0.jsonl" \
-  --num-shards 2 --shard-index 0 \
-  > "$BASE/logs/delta_shard_0.log" 2>&1 &
-pid0=$!
-CUDA_VISIBLE_DEVICES=1 "$PYTHON_BIN" "$PROJECT_ROOT/score_bridge_delta_features.py" \
-  "${common[@]}" --output "$DELTA_DIR/shard_1.jsonl" \
-  --num-shards 2 --shard-index 1 \
-  > "$BASE/logs/delta_shard_1.log" 2>&1 &
-pid1=$!
-printf '%s\n' "$pid0" > "$DELTA_DIR/shard_0.pid"
-printf '%s\n' "$pid1" > "$DELTA_DIR/shard_1.pid"
+  echo "[$(date -Is)] launching two system-preserving delta shards"
+  CUDA_VISIBLE_DEVICES=0 "$PYTHON_BIN" "$PROJECT_ROOT/score_bridge_delta_features.py" \
+    "${common[@]}" --output "$DELTA_DIR/shard_0.jsonl" \
+    --num-shards 2 --shard-index 0 \
+    > "$BASE/logs/delta_shard_0.log" 2>&1 &
+  pid0=$!
+  CUDA_VISIBLE_DEVICES=1 "$PYTHON_BIN" "$PROJECT_ROOT/score_bridge_delta_features.py" \
+    "${common[@]}" --output "$DELTA_DIR/shard_1.jsonl" \
+    --num-shards 2 --shard-index 1 \
+    > "$BASE/logs/delta_shard_1.log" 2>&1 &
+  pid1=$!
+  printf '%s\n' "$pid0" > "$DELTA_DIR/shard_0.pid"
+  printf '%s\n' "$pid1" > "$DELTA_DIR/shard_1.pid"
 
-set +e
-wait "$pid0"; code0=$?
-wait "$pid1"; code1=$?
-set -e
-printf '%s\n' "$code0" > "$DELTA_DIR/shard_0.exit"
-printf '%s\n' "$code1" > "$DELTA_DIR/shard_1.exit"
-if (( code0 != 0 || code1 != 0 )); then
-  echo "Delta scoring failed: shard0=$code0 shard1=$code1" >&2
-  exit 4
+  set +e
+  wait "$pid0"; code0=$?
+  wait "$pid1"; code1=$?
+  set -e
+  printf '%s\n' "$code0" > "$DELTA_DIR/shard_0.exit"
+  printf '%s\n' "$code1" > "$DELTA_DIR/shard_1.exit"
+  if (( code0 != 0 || code1 != 0 )); then
+    echo "Delta scoring failed: shard0=$code0 shard1=$code1" >&2
+    exit 4
+  fi
+  delta_total="$(( $(wc -l < "$DELTA_DIR/shard_0.jsonl") + $(wc -l < "$DELTA_DIR/shard_1.jsonl") ))"
+  test "$delta_total" -eq 636 || { echo "Expected 636 delta rows, found $delta_total" >&2; exit 5; }
 fi
 
-total="$(( $(wc -l < "$DELTA_DIR/shard_0.jsonl") + $(wc -l < "$DELTA_DIR/shard_1.jsonl") ))"
-test "$total" -eq 636 || { echo "Expected 636 delta rows, found $total" >&2; exit 5; }
-
-echo "[$(date -Is)] fitting root-grouped cross-fitted calibrator"
-"$PYTHON_BIN" "$PROJECT_ROOT/fit_bridge_calibrated_rcst.py" \
-  --candidates "$CANDIDATES" \
-  --aggregates "$AGGREGATES" \
-  --delta-features "$DELTA_DIR/shard_0.jsonl" "$DELTA_DIR/shard_1.jsonl" \
-  --output-dir "$CALIBRATION_DIR" \
-  --folds 5 --bootstrap-models 32 --ridge-alpha 5.0 \
-  --confidence-z 1.0 --uncertainty-floor 0.01 --min-score 0.0 \
-  > "$BASE/logs/calibration.log" 2>&1
+if [[ -s "$CALIBRATION_DIR/bridge_calibrated_selected.jsonl" \
+  && -s "$CALIBRATION_DIR/diagnostics.json" \
+  && "$(wc -l < "$CALIBRATION_DIR/bridge_calibrated_selected.jsonl")" -eq 212 ]]; then
+  echo "[$(date -Is)] complete 212-root calibration already exists; skipping calibration"
+else
+  echo "[$(date -Is)] fitting root-grouped cross-fitted calibrator"
+  "$PYTHON_BIN" "$PROJECT_ROOT/fit_bridge_calibrated_rcst.py" \
+    --candidates "$CANDIDATES" \
+    --aggregates "$AGGREGATES" \
+    --delta-features "$DELTA_DIR/shard_0.jsonl" "$DELTA_DIR/shard_1.jsonl" \
+    --output-dir "$CALIBRATION_DIR" \
+    --folds 5 --bootstrap-models 32 --ridge-alpha 5.0 \
+    --confidence-z 1.0 --uncertainty-floor 0.01 --min-score 0.0 \
+    > "$BASE/logs/calibration.log" 2>&1
+fi
 
 echo "[$(date -Is)] bridge calibration complete"
 cat "$CALIBRATION_DIR/diagnostics.json"
