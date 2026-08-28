@@ -29,6 +29,10 @@ NNODES="${NNODES:-1}"
 TP_SIZE="${TP_SIZE:-1}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-fair-pilot-arm}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+BRIDGE_ENABLED="${BRIDGE_ENABLED:-0}"
+BRIDGE_ALPHA="${BRIDGE_ALPHA:-0.1}"
+BRIDGE_CLIP="${BRIDGE_CLIP:-1.0}"
+BRIDGE_DATASET_PATH="${BRIDGE_DATASET_PATH:-$PROJECT_ROOT/rcst_bridge_dataset.py}"
 
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export WANDB_MODE=disabled HYDRA_FULL_ERROR=1 VLLM_USE_V1=0
@@ -60,6 +64,11 @@ cd "$SCAF_REPO"
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \
   algorithm.use_kl_in_reward=false \
+  "+algorithm.bridge.enabled=$BRIDGE_ENABLED" \
+  "+algorithm.bridge.alpha=$BRIDGE_ALPHA" \
+  "+algorithm.bridge.clip=$BRIDGE_CLIP" \
+  "data.custom_cls.path=$BRIDGE_DATASET_PATH" \
+  data.custom_cls.name=RCSTBridgeDataset \
   actor_rollout_ref.actor.entropy_coeff=0 \
   actor_rollout_ref.rollout.temperature=1.0 \
   "actor_rollout_ref.rollout.n=$ROLLOUTS" \
