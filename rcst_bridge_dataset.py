@@ -54,6 +54,38 @@ class RCSTBridgeDataset(RLHFDataset):
         else:
             prompt_ids = []
 
+        control_subproblem = str(extra.get("bridge_control_subproblem") or "").strip()
+        control_answer = str(extra.get("bridge_control_subproblem_answer") or "").strip()
+        if enabled and control_subproblem:
+            control_messages = build_bridge_messages(
+                original_messages, control_subproblem, control_answer
+            )
+            control_prompt = self.tokenizer.apply_chat_template(
+                control_messages, add_generation_prompt=True, tokenize=False
+            )
+            control_prompt_ids = self.tokenizer.encode(
+                control_prompt, add_special_tokens=False
+            )
+            if len(control_prompt_ids) > self.max_prompt_length:
+                if self.truncation == "left":
+                    control_prompt_ids = control_prompt_ids[-self.max_prompt_length :]
+                elif self.truncation == "right":
+                    control_prompt_ids = control_prompt_ids[: self.max_prompt_length]
+                elif self.truncation == "middle":
+                    left = self.max_prompt_length // 2
+                    control_prompt_ids = (
+                        control_prompt_ids[:left]
+                        + control_prompt_ids[-(self.max_prompt_length - left) :]
+                    )
+                else:
+                    raise RuntimeError(
+                        "Bridge control prompt length "
+                        f"{len(control_prompt_ids)} exceeds {self.max_prompt_length}"
+                    )
+        else:
+            control_prompt_ids = []
+
         row["bridge_prompt_ids"] = prompt_ids
+        row["bridge_control_prompt_ids"] = control_prompt_ids
         row["bridge_enabled"] = enabled
         return row

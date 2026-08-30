@@ -32,6 +32,9 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 BRIDGE_ENABLED="${BRIDGE_ENABLED:-0}"
 BRIDGE_ALPHA="${BRIDGE_ALPHA:-0.1}"
 BRIDGE_CLIP="${BRIDGE_CLIP:-1.0}"
+BRIDGE_CONTRASTIVE="${BRIDGE_CONTRASTIVE:-false}"
+BRIDGE_DECAY_START_FRACTION="${BRIDGE_DECAY_START_FRACTION:-1.0}"
+BRIDGE_DECAY_END_FRACTION="${BRIDGE_DECAY_END_FRACTION:-1.0}"
 BRIDGE_DATASET_PATH="${BRIDGE_DATASET_PATH:-$PROJECT_ROOT/rcst_bridge_dataset.py}"
 
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
@@ -67,6 +70,10 @@ cd "$SCAF_REPO"
   "+algorithm.bridge.enabled=$BRIDGE_ENABLED" \
   "+algorithm.bridge.alpha=$BRIDGE_ALPHA" \
   "+algorithm.bridge.clip=$BRIDGE_CLIP" \
+  "+algorithm.bridge.contrastive=$BRIDGE_CONTRASTIVE" \
+  "+algorithm.bridge.total_steps=$TRAIN_STEPS" \
+  "+algorithm.bridge.decay_start_fraction=$BRIDGE_DECAY_START_FRACTION" \
+  "+algorithm.bridge.decay_end_fraction=$BRIDGE_DECAY_END_FRACTION" \
   "data.custom_cls.path=$BRIDGE_DATASET_PATH" \
   data.custom_cls.name=RCSTBridgeDataset \
   actor_rollout_ref.actor.entropy_coeff=0 \

@@ -63,16 +63,18 @@ def _pad_left(sequences, pad_token_id, device):
     return result, mask
 
 
-def build_bridge_logprob_batch(data: DataProto, tokenizer) -> DataProto | None:
+def build_bridge_logprob_batch(
+    data: DataProto, tokenizer, prompt_key: str = "bridge_prompt_ids"
+) -> DataProto | None:
     """Build root+subproblem prompts while preserving the sampled responses."""
-    if "bridge_prompt_ids" not in data.non_tensor_batch:
+    if prompt_key not in data.non_tensor_batch:
         return None
     enabled = np.asarray(data.non_tensor_batch.get("bridge_enabled", []), dtype=bool)
     if enabled.size == 0 or not enabled.any():
         return None
     root_prompts = data.batch["prompts"]
     max_prompt_length = root_prompts.size(1)
-    prompt_ids = data.non_tensor_batch["bridge_prompt_ids"]
+    prompt_ids = data.non_tensor_batch[prompt_key]
     sequences = []
     for index in range(len(data)):
         if enabled[index] and len(prompt_ids[index]):
@@ -102,7 +104,9 @@ def build_bridge_logprob_batch(data: DataProto, tokenizer) -> DataProto | None:
     return bridge
 
 
-def apply_bridge_advantage(data: DataProto, config, metrics: dict) -> DataProto:
+def apply_bridge_advantage(
+    data: DataProto, config, metrics: dict, global_step: int | None = None
+) -> DataProto:
     """Inject normalized Delta only into all-zero GRPO groups."""
     bridge_config = config.get("bridge", {})
     if not bridge_config or not bool(bridge_config.get("enabled", False)):
@@ -114,8 +118,29 @@ def apply_bridge_advantage(data: DataProto, config, metrics: dict) -> DataProto:
     eps = float(bridge_config.get("eps", 1e-6))
     response_mask = data.batch["response_mask"]
     lengths = response_mask.sum(dim=-1).clamp_min(1)
-    delta = ((data.batch["bridge_log_probs"] - data.batch["old_log_probs"]) * response_mask).sum(dim=-1)
+    contrastive = bool(bridge_config.get("contrastive", False))
+    if contrastive:
+        if "bridge_control_log_probs" not in data.batch:
+            raise RuntimeError(
+                "Contrastive Bridge is enabled but bridge_control_log_probs are missing"
+            )
+        baseline_log_probs = data.batch["bridge_control_log_probs"]
+    else:
+        baseline_log_probs = data.batch["old_log_probs"]
+    delta = ((data.batch["bridge_log_probs"] - baseline_log_probs) * response_mask).sum(dim=-1)
     delta = delta / lengths
+
+    effective_alpha = alpha
+    total_steps = int(bridge_config.get("total_steps", 0))
+    decay_start_fraction = float(bridge_config.get("decay_start_fraction", 1.0))
+    decay_end_fraction = float(bridge_config.get("decay_end_fraction", 1.0))
+    if global_step is not None and total_steps > 0 and decay_end_fraction < 1.0:
+        progress = float(global_step) / float(total_steps)
+        if progress >= decay_end_fraction:
+            effective_alpha = 0.0
+        elif progress > decay_start_fraction:
+            width = max(decay_end_fraction - decay_start_fraction, eps)
+            effective_alpha = alpha * (decay_end_fraction - progress) / width
     scores = data.batch["token_level_scores"].sum(dim=-1)
     enabled = torch.as_tensor(
         np.asarray(data.non_tensor_batch.get("bridge_enabled", np.zeros(len(data))), dtype=bool),
@@ -134,7 +159,7 @@ def apply_bridge_advantage(data: DataProto, config, metrics: dict) -> DataProto:
         normalized[indices] = values.clamp(-clip, clip)
         touched_groups += 1
         touched_samples += int(indices.numel())
-    addition = alpha * normalized.unsqueeze(-1) * response_mask
+    addition = effective_alpha * normalized.unsqueeze(-1) * response_mask
     data.batch["advantages"] = data.batch["advantages"] + addition
     data.batch["returns"] = data.batch["returns"] + addition
     metrics.update(
@@ -143,6 +168,8 @@ def apply_bridge_advantage(data: DataProto, config, metrics: dict) -> DataProto:
             "bridge/active_samples": touched_samples,
             "bridge/delta_mean": delta[enabled].mean().item() if bool(enabled.any()) else 0.0,
             "bridge/delta_std": delta[enabled].std(unbiased=False).item() if bool(enabled.any()) else 0.0,
+            "bridge/alpha_effective": effective_alpha,
+            "bridge/contrastive": float(contrastive),
         }
     )
     return data
@@ -1338,6 +1365,19 @@ class RayPPOTrainer:
                                 bridge_log_prob = self.actor_rollout_wg.compute_log_prob(bridge_batch)
                                 batch.batch["bridge_log_probs"] = bridge_log_prob.batch["old_log_probs"]
                                 del bridge_batch, bridge_log_prob
+                                if bool(bridge_config.get("contrastive", False)):
+                                    control_batch = build_bridge_logprob_batch(
+                                        batch, self.tokenizer, "bridge_control_prompt_ids"
+                                    )
+                                    if control_batch is None:
+                                        raise RuntimeError(
+                                            "Contrastive Bridge requires a control prompt for each enabled root"
+                                        )
+                                    control_log_prob = self.actor_rollout_wg.compute_log_prob(control_batch)
+                                    batch.batch["bridge_control_log_probs"] = control_log_prob.batch[
+                                        "old_log_probs"
+                                    ]
+                                    del control_batch, control_log_prob
 
                         if "rollout_log_probs" in batch.batch.keys():
                             # TODO: we may want to add diff of probs too.
@@ -1412,7 +1452,9 @@ class RayPPOTrainer:
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                             config=self.config.algorithm,
                         )
-                        batch = apply_bridge_advantage(batch, self.config.algorithm, metrics)
+                        batch = apply_bridge_advantage(
+                            batch, self.config.algorithm, metrics, self.global_steps
+                        )
 
                     # update critic
                     if self.use_critic:
