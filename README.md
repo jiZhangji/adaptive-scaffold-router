@@ -1,5 +1,14 @@
 # Adaptive Scaffold Experiment
 
+## 当前方法：简化 RCST（实验版）
+
+先选出经过核验、学生能学到的子题，与无提示原题混合训练；最后只训练原题。
+不使用中间提示阶段，也不使用 Bridge 奖励。按完整题面关联资料，拒绝重复 ID 导致的错配。
+
+**代码已实现，尚未证明涨分。旧候选必须重新核验，不能直接扩大训练。**
+
+使用说明：[简化 RCST](docs/simple-rcst.md)。以下内容保留早期方案与复现实验说明。
+
 ## Current focus: verifiable subproblem GRPO
 
 The current research target is the training-time subproblem idea, not the

@@ -29,6 +29,9 @@ NNODES="${NNODES:-1}"
 TP_SIZE="${TP_SIZE:-1}"
 EXPERIMENT_NAME="${EXPERIMENT_NAME:-fair-pilot-arm}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
+PLAIN_GRPO="${PLAIN_GRPO:-0}"
+TRAIN_SHUFFLE="${TRAIN_SHUFFLE:-true}"
+FILTER_OVERLONG_PROMPTS="${FILTER_OVERLONG_PROMPTS:-true}"
 BRIDGE_ENABLED="${BRIDGE_ENABLED:-0}"
 BRIDGE_ALPHA="${BRIDGE_ALPHA:-0.1}"
 BRIDGE_CLIP="${BRIDGE_CLIP:-1.0}"
@@ -36,6 +39,21 @@ BRIDGE_CONTRASTIVE="${BRIDGE_CONTRASTIVE:-false}"
 BRIDGE_DECAY_START_FRACTION="${BRIDGE_DECAY_START_FRACTION:-1.0}"
 BRIDGE_DECAY_END_FRACTION="${BRIDGE_DECAY_END_FRACTION:-1.0}"
 BRIDGE_DATASET_PATH="${BRIDGE_DATASET_PATH:-$PROJECT_ROOT/rcst_bridge_dataset.py}"
+
+BRIDGE_ARGS=(
+  "+algorithm.bridge.enabled=$BRIDGE_ENABLED"
+  "+algorithm.bridge.alpha=$BRIDGE_ALPHA"
+  "+algorithm.bridge.clip=$BRIDGE_CLIP"
+  "+algorithm.bridge.contrastive=$BRIDGE_CONTRASTIVE"
+  "+algorithm.bridge.total_steps=$TRAIN_STEPS"
+  "+algorithm.bridge.decay_start_fraction=$BRIDGE_DECAY_START_FRACTION"
+  "+algorithm.bridge.decay_end_fraction=$BRIDGE_DECAY_END_FRACTION"
+  "data.custom_cls.path=$BRIDGE_DATASET_PATH"
+  data.custom_cls.name=RCSTBridgeDataset
+)
+if [[ "$PLAIN_GRPO" == 1 ]]; then
+  BRIDGE_ARGS=(+algorithm.bridge.enabled=0 data.custom_cls.path=null data.custom_cls.name=null)
+fi
 
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 TOKENIZERS_PARALLELISM=false
 export WANDB_MODE=disabled HYDRA_FULL_ERROR=1 VLLM_USE_V1=0
@@ -49,10 +67,11 @@ cd "$SCAF_REPO"
   algorithm.adv_estimator=grpo \
   "data.train_files=$TRAIN_DATA" "data.val_files=$VAL_FILES" \
   "data.train_batch_size=$TRAIN_BATCH_SIZE" data.val_batch_size=512 \
+  "data.shuffle=$TRAIN_SHUFFLE" \
   data.dataloader_num_workers=0 \
   "data.max_prompt_length=$MAX_PROMPT_LENGTH" \
   "data.max_response_length=$MAX_RESPONSE_LENGTH" \
-  data.filter_overlong_prompts=true data.truncation=error \
+  "data.filter_overlong_prompts=$FILTER_OVERLONG_PROMPTS" data.truncation=error \
   "actor_rollout_ref.model.path=$MODEL_PATH" \
   actor_rollout_ref.model.enable_gradient_checkpointing=true \
   actor_rollout_ref.model.use_remove_padding=false \
@@ -67,15 +86,7 @@ cd "$SCAF_REPO"
   actor_rollout_ref.actor.kl_loss_coef=0.0 \
   actor_rollout_ref.actor.kl_loss_type=low_var_kl \
   algorithm.use_kl_in_reward=false \
-  "+algorithm.bridge.enabled=$BRIDGE_ENABLED" \
-  "+algorithm.bridge.alpha=$BRIDGE_ALPHA" \
-  "+algorithm.bridge.clip=$BRIDGE_CLIP" \
-  "+algorithm.bridge.contrastive=$BRIDGE_CONTRASTIVE" \
-  "+algorithm.bridge.total_steps=$TRAIN_STEPS" \
-  "+algorithm.bridge.decay_start_fraction=$BRIDGE_DECAY_START_FRACTION" \
-  "+algorithm.bridge.decay_end_fraction=$BRIDGE_DECAY_END_FRACTION" \
-  "data.custom_cls.path=$BRIDGE_DATASET_PATH" \
-  data.custom_cls.name=RCSTBridgeDataset \
+  "${BRIDGE_ARGS[@]}" \
   actor_rollout_ref.actor.entropy_coeff=0 \
   actor_rollout_ref.rollout.temperature=1.0 \
   "actor_rollout_ref.rollout.n=$ROLLOUTS" \
